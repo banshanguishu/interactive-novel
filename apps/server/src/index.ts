@@ -1,14 +1,21 @@
 import cors from "cors";
 import dotenv from "dotenv";
 import express from "express";
-import type { GameSchemaPayload, HealthPayload, StartGameRequest } from "../../../shared/api.js";
+import type {
+  GameSchemaPayload,
+  GetGameResponse,
+  HealthPayload,
+  StartGameRequest,
+  StartGameStreamEnvelope,
+} from "../../../shared/api.js";
 import {
   PLAYER_BACKGROUNDS,
   PLAYER_TALENTS,
   STARTING_ASSETS,
   type GameState,
 } from "../../../shared/game.js";
-import { bootstrapGame } from "./bootstrap.js";
+import { bootstrapGame, createBootstrappedState, finalizeOpeningState } from "./bootstrap.js";
+import { streamOpeningScene } from "./llm.js";
 
 dotenv.config();
 
@@ -63,11 +70,11 @@ app.get("/game/schema", (_req, res) => {
 
 app.get("/game/state-example", (_req, res) => {
   const payload = bootstrapGame({
-      name: "韩小满",
-      background: "落魄读书人",
-      talent: "诗词才情",
-      startingAsset: "一封旧人情信",
-    });
+    name: "韩小满",
+    background: "落魄读书人",
+    talent: "诗词才情",
+    startingAsset: "一封旧人情信",
+  });
 
   res.json(payload);
 });
@@ -89,6 +96,58 @@ app.post("/game/start", (req, res) => {
   res.status(201).json(payload);
 });
 
+app.post("/game/start/stream", async (req, res) => {
+  if (!isValidStartGameRequest(req.body)) {
+    res.status(400).json({
+      error: "Invalid start game payload.",
+    });
+    return;
+  }
+
+  const state = createBootstrappedState({
+    ...req.body,
+    name: req.body.name.trim(),
+  });
+
+  res.setHeader("Content-Type", "text/event-stream; charset=utf-8");
+  res.setHeader("Cache-Control", "no-cache, no-transform");
+  res.setHeader("Connection", "keep-alive");
+  res.flushHeaders();
+
+  const sendEnvelope = (envelope: StartGameStreamEnvelope) => {
+    res.write(`data: ${JSON.stringify(envelope)}\n\n`);
+  };
+
+  try {
+    const streamResult = await streamOpeningScene({
+      state,
+      onTextChunk: async (text) => {
+        sendEnvelope({
+          type: "chunk",
+          text,
+        });
+      },
+    });
+
+    const payload = finalizeOpeningState(state, streamResult.opening);
+    gameStore.set(payload.state.gameId, payload.state);
+
+    sendEnvelope({
+      type: "result",
+      source: streamResult.source,
+      payload,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Failed to stream opening scene.";
+    sendEnvelope({
+      type: "error",
+      error: message,
+    });
+  } finally {
+    res.end();
+  }
+});
+
 app.get("/game/:id", (req, res) => {
   const state = gameStore.get(req.params.id);
 
@@ -97,7 +156,8 @@ app.get("/game/:id", (req, res) => {
     return;
   }
 
-  res.json({ state });
+  const payload: GetGameResponse = { state };
+  res.json(payload);
 });
 
 app.listen(port, () => {

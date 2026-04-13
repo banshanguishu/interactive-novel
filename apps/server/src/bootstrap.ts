@@ -10,7 +10,7 @@ function uniqueFlags(flags: StoryFlag[]): StoryFlag[] {
   return [...new Set(flags)];
 }
 
-function buildOpeningChoices(state: GameState): Choice[] {
+export function buildOpeningChoices(state: GameState): Choice[] {
   const baseChoices: Choice[] = [
     {
       id: "head_to_inn",
@@ -47,7 +47,7 @@ function buildOpeningChoices(state: GameState): Choice[] {
   return baseChoices;
 }
 
-function buildOpeningNarrative(state: GameState): string {
+export function buildOpeningNarrative(state: GameState): string {
   const { name, background, talent, startingAsset } = state.playerProfile;
 
   const backgroundText =
@@ -125,25 +125,40 @@ function applyAssetBonuses(state: GameState): void {
   }
 }
 
-export function bootstrapGame(input: StartGameRequest): StartGamePayload {
+export function createBootstrappedState(input: StartGameRequest): GameState {
   const state = createEmptyGameState(input);
 
   applyBackgroundBonuses(state);
   applyTalentBonuses(state);
   applyAssetBonuses(state);
 
-  const opening = {
+  return state;
+}
+
+export function buildFallbackOpening(state: GameState): StartGamePayload["opening"] {
+  return {
     narrative: buildOpeningNarrative(state),
     choices: buildOpeningChoices(state),
     suggestedStateChanges: {},
     events: ["game_started", "entered_chapter_1"],
     summary: `${state.playerProfile.name}在临河县醒来，开始寻找第一个立足机会。`,
   };
+}
 
+export function finalizeOpeningState(
+  state: GameState,
+  opening: StartGamePayload["opening"],
+): StartGamePayload {
   state.progression.turn = 1;
   state.lastChoices = opening.choices;
   state.recentSummaries = [opening.summary];
   state.lastUpdatedAt = new Date().toISOString();
 
   return { state, opening };
+}
+
+export function bootstrapGame(input: StartGameRequest): StartGamePayload {
+  const state = createBootstrappedState(input);
+
+  return finalizeOpeningState(state, buildFallbackOpening(state));
 }

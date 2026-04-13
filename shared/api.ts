@@ -1,4 +1,5 @@
 import type {
+  GameState,
   PlayerBackground,
   PlayerTalent,
   SaveMeta,
@@ -30,6 +31,21 @@ export type GameSchemaPayload = {
   startingAssets: readonly StartingAsset[];
 };
 
+export type StartGameStreamEnvelope =
+  | {
+      type: "chunk";
+      text: string;
+    }
+  | {
+      type: "result";
+      source: "llm" | "fallback";
+      payload: StartGamePayload;
+    }
+  | {
+      type: "error";
+      error: string;
+    };
+
 export type TurnStreamEnvelope = {
   type: "chunk" | "result" | "error";
   text?: string;
@@ -39,3 +55,7 @@ export type TurnStreamEnvelope = {
 
 export type StartGameRequest = StartGameInput;
 export type StartGameResponse = StartGamePayload;
+
+export type GetGameResponse = {
+  state: GameState;
+};
