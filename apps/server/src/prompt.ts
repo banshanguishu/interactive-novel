@@ -1,4 +1,5 @@
 import type { GameState } from "../../../shared/game.js";
+import type { Choice } from "../../../shared/game.js";
 
 export const OPENING_JSON_MARKER = "<<<GAME_JSON>>>";
 
@@ -29,5 +30,40 @@ export function buildOpeningSystemPrompt(state: GameState): string {
     `当前目标：${state.currentObjective}`,
     `当前数值：名望=${state.stats.reputation}，钱财=${state.stats.wealth}，状态标签=${state.stats.statusTags.join("、")}`,
     `关键关系：${favorSnapshot}`,
+  ].join("\n");
+}
+
+export function buildTurnSystemPrompt(state: GameState, selectedChoice: Choice): string {
+  const favorSnapshot = Object.entries(state.stats.favor)
+    .map(([npcId, value]) => `${npcId}:${value}`)
+    .join(", ");
+
+  return [
+    "你是一名中国网文风格的互动小说叙事模型。",
+    "任务：基于当前游戏状态和玩家刚做出的选择，生成下一回合剧情。",
+    "背景：架空古代王朝承晔朝，主角是现代打工人穿越者，在临河县从草民起步逆袭。",
+    "风格要求：节奏快、爽感明确、人物动机真实，不能写成说明文。",
+    "必须满足：",
+    "1. 先输出纯叙事正文，不要加标题，不要加 markdown。",
+    "2. 正文长度控制在 320 到 520 字。",
+    `3. 正文结束后，单独输出一行 ${OPENING_JSON_MARKER}`,
+    "4. 在标记后输出一个合法 JSON 对象，不能有代码块标记。",
+    "JSON 对象结构：",
+    '{"summary":"一句话摘要","events":["event_name"],"choices":[{"id":"choice_1","label":"中文选项标题","intent":"行动意图"}],"suggestedStateChanges":{"reputation":0,"wealth":0,"favor":{"liu_sanniang":0},"addTags":["崭露头角"]}}',
+    "choices 数量必须为 3 个，最多 4 个。",
+    "suggestedStateChanges 必须谨慎、轻量，数值变化通常在 -1 到 2 之间，不要夸张。",
+    "每一轮都要有新信息、新风险或新机会，不能重复上一轮内容。",
+    "不要替玩家做最终决定，必须把局面推到新的选择点。",
+    `当前章节：${state.progression.chapterId}`,
+    `当前场景：${state.progression.sceneId}`,
+    `当前回合：${state.progression.turn}`,
+    `玩家本轮刚选择：${selectedChoice.label}；意图：${selectedChoice.intent}`,
+    `玩家名：${state.playerProfile.name}`,
+    `初始背景：${state.playerProfile.background}`,
+    `初始天赋：${state.playerProfile.talent}`,
+    `当前目标：${state.currentObjective}`,
+    `当前数值：名望=${state.stats.reputation}，钱财=${state.stats.wealth}，状态标签=${state.stats.statusTags.join("、") || "无"}`,
+    `关键关系：${favorSnapshot}`,
+    `最近剧情摘要：${state.recentSummaries.join(" | ") || "这是第一轮后的推进。"}`,
   ].join("\n");
 }

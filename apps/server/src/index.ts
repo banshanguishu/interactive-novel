@@ -7,6 +7,8 @@ import type {
   HealthPayload,
   StartGameRequest,
   StartGameStreamEnvelope,
+  TurnRequest,
+  TurnStreamEnvelope,
 } from "../../../shared/api.js";
 import {
   PLAYER_BACKGROUNDS,
@@ -15,7 +17,14 @@ import {
   type GameState,
 } from "../../../shared/game.js";
 import { bootstrapGame, createBootstrappedState, finalizeOpeningState } from "./bootstrap.js";
-import { streamOpeningScene } from "./llm.js";
+import { streamOpeningScene, streamTurnScene } from "./llm.js";
+import {
+  advanceStateForChoice,
+  buildFallbackTurnResult,
+  finalizeTurnState,
+  findChoiceById,
+  validateTurnRequest,
+} from "./turn.js";
 
 dotenv.config();
 
@@ -139,6 +148,77 @@ app.post("/game/start/stream", async (req, res) => {
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Failed to stream opening scene.";
+    sendEnvelope({
+      type: "error",
+      error: message,
+    });
+  } finally {
+    res.end();
+  }
+});
+
+app.post("/game/turn/stream", async (req, res) => {
+  if (!validateTurnRequest(req.body)) {
+    res.status(400).json({
+      error: "Invalid turn payload.",
+    });
+    return;
+  }
+
+  const { gameId, choiceId } = req.body as TurnRequest;
+  const state = gameStore.get(gameId);
+
+  if (!state) {
+    res.status(404).json({ error: "Game not found." });
+    return;
+  }
+
+  const selectedChoice = findChoiceById(state, choiceId);
+
+  if (!selectedChoice) {
+    res.status(400).json({ error: "Choice not found in current turn." });
+    return;
+  }
+
+  const nextState: GameState = JSON.parse(JSON.stringify(state)) as GameState;
+  const outcome = advanceStateForChoice(nextState, selectedChoice);
+  const fallbackTurn = buildFallbackTurnResult(nextState, selectedChoice, outcome);
+
+  res.setHeader("Content-Type", "text/event-stream; charset=utf-8");
+  res.setHeader("Cache-Control", "no-cache, no-transform");
+  res.setHeader("Connection", "keep-alive");
+  res.flushHeaders();
+
+  const sendEnvelope = (envelope: TurnStreamEnvelope) => {
+    res.write(`data: ${JSON.stringify(envelope)}\n\n`);
+  };
+
+  try {
+    const streamResult = await streamTurnScene({
+      state: nextState,
+      selectedChoice,
+      fallback: fallbackTurn,
+      onTextChunk: async (text) => {
+        sendEnvelope({
+          type: "chunk",
+          text,
+        });
+      },
+    });
+
+    finalizeTurnState(nextState, streamResult.turn);
+    gameStore.set(nextState.gameId, nextState);
+
+    sendEnvelope({
+      type: "result",
+      source: streamResult.source,
+      payload: {
+        state: nextState,
+        turn: streamResult.turn,
+      },
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Failed to stream next turn.";
     sendEnvelope({
       type: "error",
       error: message,

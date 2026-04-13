@@ -4,6 +4,8 @@ import type {
   StartGameRequest,
   StartGameResponse,
   StartGameStreamEnvelope,
+  TurnRequest,
+  TurnStreamEnvelope,
 } from "../../../shared/api.js";
 import {
   PLAYER_BACKGROUNDS,
@@ -19,11 +21,13 @@ export default function App() {
   const [health, setHealth] = useState<HealthPayload | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [turnSubmitting, setTurnSubmitting] = useState(false);
   const [startError, setStartError] = useState<string | null>(null);
+  const [turnError, setTurnError] = useState<string | null>(null);
   const [gameState, setGameState] = useState<GameState | null>(null);
-  const [opening, setOpening] = useState<TurnResult | null>(null);
+  const [currentTurn, setCurrentTurn] = useState<TurnResult | null>(null);
   const [streamedNarrative, setStreamedNarrative] = useState("");
-  const [openingSource, setOpeningSource] = useState<"llm" | "fallback" | null>(null);
+  const [turnSource, setTurnSource] = useState<"llm" | "fallback" | null>(null);
   const [form, setForm] = useState<StartGameRequest>({
     name: "韩小满",
     background: PLAYER_BACKGROUNDS[0],
@@ -57,10 +61,11 @@ export default function App() {
     event.preventDefault();
     setSubmitting(true);
     setStartError(null);
+    setTurnError(null);
     setStreamedNarrative("");
-    setOpeningSource(null);
+    setTurnSource(null);
     setGameState(null);
-    setOpening(null);
+    setCurrentTurn(null);
 
     try {
       const response = await fetch(`${apiBaseUrl}/game/start/stream`, {
@@ -120,9 +125,9 @@ export default function App() {
 
             if (envelope.type === "result") {
               const payload = envelope.payload as StartGameResponse;
-              setOpeningSource(envelope.source);
+              setTurnSource(envelope.source);
               setGameState(payload.state);
-              setOpening(payload.opening);
+              setCurrentTurn(payload.opening);
             }
           }
         }
@@ -133,6 +138,93 @@ export default function App() {
       setStartError(message);
     } finally {
       setSubmitting(false);
+    }
+  }
+
+  async function handleChoose(choiceId: string) {
+    if (!gameState || !currentTurn) {
+      return;
+    }
+
+    setTurnSubmitting(true);
+    setTurnError(null);
+    setStreamedNarrative("");
+
+    const payload: TurnRequest = {
+      gameId: gameState.gameId,
+      choiceId,
+    };
+
+    try {
+      const response = await fetch(`${apiBaseUrl}/game/turn/stream`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload),
+      });
+
+      if (!response.ok) {
+        throw new Error(`推进回合失败：${response.status}`);
+      }
+
+      if (!response.body) {
+        throw new Error("推进回合失败：未收到流式响应。");
+      }
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+
+        if (done) {
+          break;
+        }
+
+        buffer += decoder.decode(value, { stream: true });
+
+        while (buffer.includes("\n\n")) {
+          const eventEndIndex = buffer.indexOf("\n\n");
+          const rawEvent = buffer.slice(0, eventEndIndex);
+          buffer = buffer.slice(eventEndIndex + 2);
+
+          const dataLines = rawEvent
+            .split("\n")
+            .filter((line) => line.startsWith("data:"))
+            .map((line) => line.slice(5).trim());
+
+          for (const line of dataLines) {
+            if (!line) {
+              continue;
+            }
+
+            const envelope = JSON.parse(line) as TurnStreamEnvelope;
+
+            if (envelope.type === "chunk") {
+              setStreamedNarrative((current) => current + (envelope.text ?? ""));
+              continue;
+            }
+
+            if (envelope.type === "error") {
+              throw new Error(envelope.error);
+            }
+
+            if (envelope.type === "result" && envelope.payload) {
+              setTurnSource(envelope.source ?? "fallback");
+              setGameState(envelope.payload.state);
+              setCurrentTurn(envelope.payload.turn);
+            }
+          }
+        }
+      }
+    } catch (requestError) {
+      const message =
+        requestError instanceof Error ? requestError.message : "推进回合失败，请稍后重试。";
+      setTurnError(message);
+    } finally {
+      setTurnSubmitting(false);
     }
   }
 
@@ -149,7 +241,7 @@ export default function App() {
           </p>
         </header>
 
-        {!gameState || !opening ? (
+        {!gameState || !currentTurn ? (
           <section className="grid gap-6 lg:grid-cols-[1.1fr_0.9fr]">
             <form
               className="rounded-3xl border border-stone-800 bg-stone-900/70 p-6"
@@ -294,25 +386,38 @@ export default function App() {
               </article>
 
               <article className="rounded-3xl border border-stone-800 bg-stone-900/70 p-6">
-                <h2 className="text-lg font-semibold text-stone-100">首轮摘要</h2>
-                <p className="mt-3 text-sm leading-7 text-stone-300">{opening.summary}</p>
+                <h2 className="text-lg font-semibold text-stone-100">当前回合摘要</h2>
+                <p className="mt-3 text-sm leading-7 text-stone-300">{currentTurn.summary}</p>
                 <p className="mt-3 text-xs uppercase tracking-[0.24em] text-stone-500">
-                  内容来源：{openingSource === "llm" ? "LLM 流式生成" : "本地回退生成"}
+                  内容来源：{turnSource === "llm" ? "LLM 流式生成" : "本地回退生成"}
                 </p>
               </article>
             </aside>
 
             <article className="rounded-3xl border border-stone-800 bg-stone-900/70 p-6">
-              <p className="text-sm uppercase tracking-[0.3em] text-amber-400">首轮剧情</p>
+              <p className="text-sm uppercase tracking-[0.3em] text-amber-400">当前剧情</p>
               <div className="mt-4 whitespace-pre-wrap text-sm leading-8 text-stone-200">
-                {opening.narrative}
+                {currentTurn.narrative}
               </div>
 
+              {turnSubmitting ? (
+                <div className="mt-6 rounded-2xl border border-stone-800 bg-stone-950/70 p-4">
+                  <p className="text-xs uppercase tracking-[0.24em] text-amber-400">下一回合生成中</p>
+                  <div className="mt-3 min-h-28 whitespace-pre-wrap text-sm leading-7 text-stone-200">
+                    {streamedNarrative || "局势正在变化..."}
+                  </div>
+                </div>
+              ) : null}
+
+              {turnError ? <p className="mt-5 text-sm text-rose-300">{turnError}</p> : null}
+
               <div className="mt-6 grid gap-3">
-                {opening.choices.map((choice) => (
+                {currentTurn.choices.map((choice) => (
                   <button
                     key={choice.id}
-                    className="rounded-2xl border border-stone-700 bg-stone-950/70 px-4 py-4 text-left text-sm leading-7 text-stone-100 transition hover:border-amber-400 hover:bg-stone-950"
+                    className="rounded-2xl border border-stone-700 bg-stone-950/70 px-4 py-4 text-left text-sm leading-7 text-stone-100 transition hover:border-amber-400 hover:bg-stone-950 disabled:cursor-not-allowed disabled:border-stone-800 disabled:text-stone-500"
+                    disabled={turnSubmitting}
+                    onClick={() => handleChoose(choice.id)}
                     type="button"
                   >
                     <span className="block font-medium text-amber-300">{choice.label}</span>
@@ -322,7 +427,7 @@ export default function App() {
               </div>
 
               <p className="mt-5 text-sm text-stone-400">
-                初始化流程已打通。下一步会把这些选项真正接到回合推进接口和流式输出。
+                现在已经能继续推进下一轮。下一步会进一步把数值变化和剧情联动做得更明显。
               </p>
             </article>
           </section>

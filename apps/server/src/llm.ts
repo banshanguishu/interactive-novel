@@ -1,6 +1,6 @@
-import type { StartGamePayload } from "../../../shared/game.js";
+import type { Choice, GameState, NpcId, StartGamePayload, StateDelta, StatusTag, StoryFlag, TurnResult } from "../../../shared/game.js";
 import { buildFallbackOpening } from "./bootstrap.js";
-import { OPENING_JSON_MARKER, buildOpeningSystemPrompt } from "./prompt.js";
+import { OPENING_JSON_MARKER, buildOpeningSystemPrompt, buildTurnSystemPrompt } from "./prompt.js";
 
 type LlmConfig = {
   baseUrl: string;
@@ -8,9 +8,17 @@ type LlmConfig = {
   model: string;
 };
 
-type StreamOpeningParams = {
-  state: StartGamePayload["state"];
+type StreamSceneParams = {
+  state: GameState;
+  fallback: TurnResult;
+  userInstruction: string;
+  systemPrompt: string;
   onTextChunk: (text: string) => Promise<void> | void;
+};
+
+type StreamSceneResult = {
+  turn: TurnResult;
+  source: "llm" | "fallback";
 };
 
 type StreamOpeningResult = {
@@ -43,9 +51,66 @@ function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
 
-function parseOpeningJson(rawJson: string, state: StartGamePayload["state"]): StartGamePayload["opening"] {
+function isStatusTag(value: string): value is StatusTag {
+  return ["初来乍到", "小有名气", "欠下人情", "被豪强盯上", "得书院赏识", "手头拮据", "崭露头角"].includes(value);
+}
+
+function isStoryFlag(value: string): value is StoryFlag {
+  return [
+    "met_shen_yanshu",
+    "met_gu_mingzhu",
+    "met_liu_sanniang",
+    "met_ma_huichuan",
+    "heard_of_xiao_qingyi",
+    "earned_first_silver",
+    "gained_local_reputation",
+    "entered_academy_circle",
+    "entered_business_circle",
+  ].includes(value);
+}
+
+function isNpcId(value: string): value is NpcId {
+  return ["shen_yanshu", "gu_mingzhu", "liu_sanniang", "ma_huichuan", "xiao_qingyi"].includes(value);
+}
+
+function parseStateDelta(raw: unknown): StateDelta {
+  if (!isObject(raw)) {
+    return {};
+  }
+
+  const favor: Partial<Record<NpcId, number>> = {};
+  if (isObject(raw.favor)) {
+    for (const [key, value] of Object.entries(raw.favor)) {
+      if (isNpcId(key) && typeof value === "number" && Number.isFinite(value)) {
+        favor[key] = Math.max(-2, Math.min(2, Math.round(value)));
+      }
+    }
+  }
+
+  return {
+    reputation: typeof raw.reputation === "number" ? Math.max(-1, Math.min(2, Math.round(raw.reputation))) : undefined,
+    wealth: typeof raw.wealth === "number" ? Math.max(-1, Math.min(2, Math.round(raw.wealth))) : undefined,
+    favor,
+    addTags: Array.isArray(raw.addTags)
+      ? raw.addTags.filter((item): item is StatusTag => typeof item === "string" && isStatusTag(item))
+      : undefined,
+    removeTags: Array.isArray(raw.removeTags)
+      ? raw.removeTags.filter((item): item is StatusTag => typeof item === "string" && isStatusTag(item))
+      : undefined,
+    addItems: Array.isArray(raw.addItems)
+      ? raw.addItems.filter((item): item is string => typeof item === "string" && item.trim().length > 0).slice(0, 2)
+      : undefined,
+    removeItems: Array.isArray(raw.removeItems)
+      ? raw.removeItems.filter((item): item is string => typeof item === "string" && item.trim().length > 0).slice(0, 2)
+      : undefined,
+    addFlags: Array.isArray(raw.addFlags)
+      ? raw.addFlags.filter((item): item is StoryFlag => typeof item === "string" && isStoryFlag(item))
+      : undefined,
+  };
+}
+
+function parseTurnJson(rawJson: string, fallback: TurnResult): TurnResult {
   const parsed: unknown = JSON.parse(rawJson);
-  const fallback = buildFallbackOpening(state);
 
   if (!isObject(parsed)) {
     return fallback;
@@ -65,11 +130,11 @@ function parseOpeningJson(rawJson: string, state: StartGamePayload["state"]): St
           label:
             typeof choice.label === "string" && choice.label.trim()
               ? choice.label.trim()
-              : fallback.choices[index]?.label ?? `开局行动 ${index + 1}`,
+              : fallback.choices[index]?.label ?? `行动 ${index + 1}`,
           intent:
             typeof choice.intent === "string" && choice.intent.trim()
               ? choice.intent.trim()
-              : fallback.choices[index]?.intent ?? "继续观察局势，寻找机会。",
+              : fallback.choices[index]?.intent ?? "继续寻找对自己最有利的推进方式。",
         }))
         .slice(0, 4)
     : fallback.choices;
@@ -83,35 +148,33 @@ function parseOpeningJson(rawJson: string, state: StartGamePayload["state"]): St
     summary,
     events: events.length > 0 ? events : fallback.events,
     choices,
-    suggestedStateChanges: {},
+    suggestedStateChanges: parseStateDelta(parsed.suggestedStateChanges),
   };
 }
 
-async function streamFallbackOpening({
-  state,
-  onTextChunk,
-}: StreamOpeningParams): Promise<StreamOpeningResult> {
-  const opening = buildFallbackOpening(state);
-
-  for (const chunk of splitNarrativeForStreaming(opening.narrative)) {
+async function streamFallbackScene({ fallback, onTextChunk }: StreamSceneParams): Promise<StreamSceneResult> {
+  for (const chunk of splitNarrativeForStreaming(fallback.narrative)) {
     await onTextChunk(chunk);
     await new Promise((resolve) => setTimeout(resolve, 20));
   }
 
   return {
-    opening,
+    turn: fallback,
     source: "fallback",
   };
 }
 
-export async function streamOpeningScene({
+async function streamStructuredScene({
   state,
+  fallback,
+  userInstruction,
+  systemPrompt,
   onTextChunk,
-}: StreamOpeningParams): Promise<StreamOpeningResult> {
+}: StreamSceneParams): Promise<StreamSceneResult> {
   const config = getLlmConfig();
 
   if (!config) {
-    return streamFallbackOpening({ state, onTextChunk });
+    return streamFallbackScene({ state, fallback, userInstruction, systemPrompt, onTextChunk });
   }
 
   const response = await fetch(createUrl(config.baseUrl, "/chat/completions"), {
@@ -127,11 +190,11 @@ export async function streamOpeningScene({
       messages: [
         {
           role: "system",
-          content: buildOpeningSystemPrompt(state),
+          content: systemPrompt,
         },
         {
           role: "user",
-          content: "请生成游戏开场剧情，并严格按要求在末尾输出 JSON。",
+          content: userInstruction,
         },
       ],
     }),
@@ -239,17 +302,58 @@ export async function streamOpeningScene({
     rawBufferState.streamBuffer = "";
   }
 
-  const fallback = buildFallbackOpening(state);
-  const parsedOpening =
+  const parsedTurn =
     rawBufferState.markerFound && rawBufferState.jsonBuffer.trim()
-      ? parseOpeningJson(rawBufferState.jsonBuffer.trim(), state)
+      ? parseTurnJson(rawBufferState.jsonBuffer.trim(), fallback)
       : fallback;
 
   return {
     source: "llm",
-    opening: {
-      ...parsedOpening,
+    turn: {
+      ...parsedTurn,
       narrative: rawBufferState.narrativeBuffer.trim() || fallback.narrative,
     },
   };
+}
+
+export async function streamOpeningScene({
+  state,
+  onTextChunk,
+}: {
+  state: StartGamePayload["state"];
+  onTextChunk: (text: string) => Promise<void> | void;
+}): Promise<StreamOpeningResult> {
+  const fallback = buildFallbackOpening(state);
+  const result = await streamStructuredScene({
+    state,
+    fallback,
+    systemPrompt: buildOpeningSystemPrompt(state),
+    userInstruction: "请生成游戏开场剧情，并严格按要求在末尾输出 JSON。",
+    onTextChunk,
+  });
+
+  return {
+    source: result.source,
+    opening: result.turn,
+  };
+}
+
+export async function streamTurnScene({
+  state,
+  selectedChoice,
+  fallback,
+  onTextChunk,
+}: {
+  state: GameState;
+  selectedChoice: Choice;
+  fallback: TurnResult;
+  onTextChunk: (text: string) => Promise<void> | void;
+}): Promise<StreamSceneResult> {
+  return streamStructuredScene({
+    state,
+    fallback,
+    systemPrompt: buildTurnSystemPrompt(state, selectedChoice),
+    userInstruction: `玩家刚刚做出的选择是：${selectedChoice.label}。请继续推进下一回合剧情，并严格按要求在末尾输出 JSON。`,
+    onTextChunk,
+  });
 }

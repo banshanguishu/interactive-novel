@@ -49,12 +49,24 @@ export type StartGameStreamEnvelope =
 export type TurnStreamEnvelope = {
   type: "chunk" | "result" | "error";
   text?: string;
-  result?: TurnResult;
+  source?: "llm" | "fallback";
+  payload?: {
+    state: GameState;
+    turn: TurnResult;
+  };
   error?: string;
 };
 
 export type StartGameRequest = StartGameInput;
 export type StartGameResponse = StartGamePayload;
+export type TurnRequest = {
+  gameId: string;
+  choiceId: string;
+};
+export type TurnResponse = {
+  state: GameState;
+  turn: TurnResult;
+};
 
 export type GetGameResponse = {
   state: GameState;
