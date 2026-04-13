@@ -1,12 +1,8 @@
 import { useEffect, useState } from "react";
+import type { HealthPayload } from "../../../shared/api.js";
+import { PLAYER_BACKGROUNDS, PLAYER_TALENTS, STARTING_ASSETS } from "../../../shared/game.js";
 
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:3001";
-
-type HealthPayload = {
-  status: string;
-  service: string;
-  time: string;
-};
 
 export default function App() {
   const [health, setHealth] = useState<HealthPayload | null>(null);
@@ -46,6 +42,11 @@ export default function App() {
             <p className="mt-3 text-sm leading-7 text-stone-300">
               现代牛马穿越到架空古代王朝，从草民起步，靠诗词、商业头脑和察言观色一路逆袭。
             </p>
+            <div className="mt-4 space-y-3 text-sm text-stone-300">
+              <p>初始背景：{PLAYER_BACKGROUNDS.join(" / ")}</p>
+              <p>初始天赋：{PLAYER_TALENTS.join(" / ")}</p>
+              <p>开局资源：{STARTING_ASSETS.join(" / ")}</p>
+            </div>
           </article>
 
           <article className="rounded-2xl border border-stone-800 bg-stone-900/70 p-5">
