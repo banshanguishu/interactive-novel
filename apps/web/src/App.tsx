@@ -95,6 +95,10 @@ function describeStateChanges(previous: GameState | null, next: GameState): Stat
   return changes;
 }
 
+function favorBarWidth(value: number): number {
+  return Math.max(0, Math.min(100, value * 10));
+}
+
 export default function App() {
   const [health, setHealth] = useState<HealthPayload | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -467,6 +471,15 @@ export default function App() {
               </article>
 
               <article className="rounded-3xl border border-stone-800 bg-stone-900/70 p-6">
+                <h2 className="text-lg font-semibold text-stone-100">当前阶段</h2>
+                <p className="mt-3 text-sm leading-7 text-stone-300">
+                  {gameState.progression.chapterId === "chapter_1"
+                    ? "当前仍处于草民立足阶段，重点是先获得第一个稳定的人脉、名声或赚钱口子。"
+                    : "当前已进入初露锋芒阶段，重点是把已有名声和资源换成更高层的机会。"}
+                </p>
+              </article>
+
+              <article className="rounded-3xl border border-stone-800 bg-stone-900/70 p-6">
                 <h2 className="text-lg font-semibold text-stone-100">关键关系</h2>
                 <div className="mt-4 space-y-3 text-sm text-stone-300">
                   {Object.entries(gameState.stats.favor).map(([npcId, value]) => (
@@ -478,7 +491,7 @@ export default function App() {
                       <div className="h-2 rounded-full bg-stone-800">
                         <div
                           className="h-2 rounded-full bg-amber-400 transition-all"
-                          style={{ width: `${Math.max(8, Math.min(100, (value + 10) * 3.2))}%` }}
+                          style={{ width: `${favorBarWidth(value)}%` }}
                         />
                       </div>
                     </div>

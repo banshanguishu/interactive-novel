@@ -28,6 +28,20 @@ function textContains(text: string, keywords: string[]): boolean {
   return keywords.some((keyword) => text.includes(keyword));
 }
 
+function createOutcome(
+  sceneId: SceneId,
+  objective: string,
+  preSceneDelta: StateDelta,
+  events: string[],
+): ChoiceOutcome {
+  return {
+    sceneId,
+    objective,
+    preSceneDelta,
+    events,
+  };
+}
+
 function mergeDelta(base: StateDelta, extra: StateDelta): StateDelta {
   const mergedFavor: NonNullable<StateDelta["favor"]> = { ...(base.favor ?? {}) };
 
@@ -55,6 +69,12 @@ export function buildChoiceOutcome(state: GameState, choice: Choice): ChoiceOutc
   const rawText = normalizeText(`${choice.id} ${choice.label} ${choice.intent}`);
   const text = normalizeChineseText(rawText);
 
+  const exactOutcome = buildExactChoiceOutcome(state, choice.id);
+
+  if (exactOutcome) {
+    return exactOutcome;
+  }
+
   let outcome: ChoiceOutcome = {
     sceneId: "crossroads",
     objective: "在临河县站稳脚跟，把刚得到的机会变成真正的人脉或收益。",
@@ -64,8 +84,11 @@ export function buildChoiceOutcome(state: GameState, choice: Choice): ChoiceOutc
 
   if (textContains(text, ["酒楼", "探消息", "消息", "打听", "掌柜", "柳三娘"])) {
     outcome = mergeChoiceOutcome(outcome, {
-      sceneId: "inn",
-      objective: "从云来酒楼撬出临河县最有价值的消息。",
+      sceneId: state.progression.sceneId === "inn" ? "crossroads" : "inn",
+      objective:
+        state.progression.sceneId === "inn"
+          ? "把在酒楼里换到的消息，立刻转成更具体的行动和机会。"
+          : "从云来酒楼撬出临河县最有价值的消息。",
       preSceneDelta: {
         favor: { liu_sanniang: 1 },
         reputation: state.stats.reputation >= 3 ? 1 : 0,
@@ -89,8 +112,11 @@ export function buildChoiceOutcome(state: GameState, choice: Choice): ChoiceOutc
 
   if (textContains(text, ["书院", "诗", "文会", "教谕", "才学"])) {
     outcome = mergeChoiceOutcome(outcome, {
-      sceneId: "academy",
-      objective: "用才学在书院圈子里打开局面，换一张往上走的门票。",
+      sceneId: state.progression.sceneId === "academy" ? "crossroads" : "academy",
+      objective:
+        state.progression.sceneId === "academy"
+          ? "把刚在书院得来的名声，转成真正能落地的人情或邀约。"
+          : "用才学在书院圈子里打开局面，换一张往上走的门票。",
       preSceneDelta: {
         reputation: state.playerProfile.talent === "诗词才情" ? 2 : 1,
         favor: { shen_yanshu: state.stats.reputation >= 3 ? 2 : 1 },
@@ -103,8 +129,11 @@ export function buildChoiceOutcome(state: GameState, choice: Choice): ChoiceOutc
 
   if (textContains(text, ["码头", "货", "商", "分账", "生意", "顾家", "银钱"])) {
     outcome = mergeChoiceOutcome(outcome, {
-      sceneId: "dock",
-      objective: "把一次买卖做成，让临河县真正有人开始记住你的本事。",
+      sceneId: state.progression.sceneId === "dock" ? "crossroads" : "dock",
+      objective:
+        state.progression.sceneId === "dock"
+          ? "把码头上的试手，推进成更稳定的商路或更高层的合作。"
+          : "把一次买卖做成，让临河县真正有人开始记住你的本事。",
       preSceneDelta: {
         wealth: state.playerProfile.talent === "商业头脑" ? 3 : 2,
         favor: {
@@ -144,6 +173,284 @@ export function buildChoiceOutcome(state: GameState, choice: Choice): ChoiceOutc
   }
 
   return outcome;
+}
+
+function buildExactChoiceOutcome(state: GameState, choiceId: string): ChoiceOutcome | null {
+  switch (choiceId) {
+    case "head_to_inn":
+    case "return_to_inn":
+      return createOutcome(
+        "inn",
+        "先在酒楼里摸清局势，找出最值得下注的人和消息。",
+        {
+          favor: { liu_sanniang: 1 },
+          addFlags: ["met_liu_sanniang"],
+        },
+        ["entered_inn_network"],
+      );
+    case "try_market":
+      return createOutcome(
+        "market",
+        "先在早市把吃饭和立足问题解决，再找第一个能赚钱的口子。",
+        {
+          wealth: 1,
+        },
+        ["entered_market_loop"],
+      );
+    case "visit_academy":
+    case "seek_academy_route":
+      return createOutcome(
+        "academy",
+        "用才学和见识在书院圈子里打开局面。",
+        {
+          reputation: state.playerProfile.talent === "诗词才情" ? 2 : 1,
+          favor: { shen_yanshu: 1 },
+          addTags: ["得书院赏识"],
+          addFlags: ["met_shen_yanshu", "entered_academy_circle"],
+        },
+        ["entered_academy_circle"],
+      );
+    case "inspect_dock":
+    case "seek_business_route":
+      return createOutcome(
+        "dock",
+        "去码头试一把，把脑子换成真正的银钱和门路。",
+        {
+          wealth: 2,
+          favor: { ma_huichuan: 1 },
+          addFlags: ["met_ma_huichuan", "entered_business_circle"],
+        },
+        ["entered_business_circle"],
+      );
+    case "find_contact":
+      return createOutcome(
+        "crossroads",
+        "把手里的线索和人情变成真正可依靠的人脉。",
+        {
+          reputation: 1,
+          addFlags: ["heard_of_xiao_qingyi"],
+        },
+        ["used_social_leverage"],
+      );
+    case "ask_liu_for_rumor":
+      return createOutcome(
+        "crossroads",
+        "顺着柳三娘给出的消息去找真正能改局的人或事。",
+        {
+          favor: { liu_sanniang: 1 },
+          reputation: 1,
+          addFlags: ["met_liu_sanniang"],
+        },
+        ["secured_key_rumor"],
+      );
+    case "observe_guests":
+      return createOutcome(
+        "crossroads",
+        "从酒楼里的细节里挑出最值得接近的对象。",
+        {
+          favor: { liu_sanniang: 1 },
+        },
+        ["profiled_key_figures"],
+      );
+    case "quote_poem_to_stand_out":
+      return createOutcome(
+        "academy",
+        "借一段诗句闯进读书人圈子，让真正有分量的人注意到你。",
+        {
+          reputation: 2,
+          favor: { shen_yanshu: 1 },
+          addTags: ["得书院赏识"],
+          addFlags: ["met_shen_yanshu", "entered_academy_circle", "gained_local_reputation"],
+        },
+        ["poetry_reputation_triggered"],
+      );
+    case "liu_private_lead":
+      return createOutcome(
+        "county_office",
+        "把柳三娘递来的暗线，换成更有分量的门路。",
+        {
+          favor: { liu_sanniang: 1 },
+          reputation: 1,
+        },
+        ["received_private_lead"],
+      );
+    case "barter_for_profit":
+      return createOutcome(
+        "market",
+        "用算账和讲价把第一笔真正像样的钱攥在手里。",
+        {
+          wealth: 2,
+          addFlags: ["earned_first_silver"],
+        },
+        ["earned_market_profit"],
+      );
+    case "help_vendor_gain_trust":
+      return createOutcome(
+        "crossroads",
+        "先换人情，再把这份人情导向更大的机会。",
+        {
+          reputation: 1,
+          addTags: ["欠下人情"],
+        },
+        ["earned_vendor_trust"],
+      );
+    case "follow_supply_clue":
+      return createOutcome(
+        "dock",
+        "顺着货路线索去码头，把零散消息变成更大的盘子。",
+        {
+          wealth: 1,
+          favor: { ma_huichuan: 1 },
+          addFlags: ["met_ma_huichuan", "entered_business_circle"],
+        },
+        ["followed_supply_chain"],
+      );
+    case "buy_information_bundle":
+      return createOutcome(
+        "crossroads",
+        "花小钱买来的情报，需要立刻兑现成更大的推进。",
+        {
+          wealth: -1,
+          reputation: 1,
+        },
+        ["purchased_information"],
+      );
+    case "join_poetry_gathering":
+      return createOutcome(
+        "crossroads",
+        "把文会上的惊艳，转成真正能落地的邀约和背书。",
+        {
+          reputation: 2,
+          favor: { shen_yanshu: 1 },
+          addFlags: ["entered_academy_circle", "gained_local_reputation"],
+        },
+        ["won_poetry_gathering"],
+      );
+    case "speak_with_shen":
+      return createOutcome(
+        "crossroads",
+        "把沈砚书的赏识变成下一步更稳的上升路线。",
+        {
+          favor: { shen_yanshu: 2 },
+          reputation: 1,
+          addFlags: ["met_shen_yanshu"],
+        },
+        ["secured_shen_support"],
+      );
+    case "watch_rivals":
+      return createOutcome(
+        "inn",
+        "先摸清谁在针对你，再决定该先联手谁、先防谁。",
+        {
+          addTags: ["被豪强盯上"],
+          reputation: 1,
+        },
+        ["detected_hidden_rivals"],
+      );
+    case "accept_patron_notice":
+      return createOutcome(
+        "county_office",
+        "顺着高位人物的试探往上走，看看谁真的愿意给你机会。",
+        {
+          reputation: 2,
+          addFlags: ["heard_of_xiao_qingyi"],
+        },
+        ["received_patron_notice"],
+      );
+    case "pitch_business_plan":
+      return createOutcome(
+        "dock",
+        "让码头上的人明白，你不是只会动嘴的人。",
+        {
+          wealth: 2,
+          favor: { ma_huichuan: 1 },
+        },
+        ["pitched_business_plan"],
+      );
+    case "approach_gu_family":
+      return createOutcome(
+        "crossroads",
+        "把一桩买卖做成进顾家视线的敲门砖。",
+        {
+          wealth: 1,
+          favor: { gu_mingzhu: 2 },
+          addFlags: ["met_gu_mingzhu"],
+        },
+        ["approached_gu_family"],
+      );
+    case "probe_ma":
+      return createOutcome(
+        "inn",
+        "先摸清马会川的底牌，省得以后被他牵着走。",
+        {
+          favor: { ma_huichuan: 1 },
+          addTags: ["被豪强盯上"],
+        },
+        ["probed_ma_huichuan"],
+      );
+    case "expand_trade_scope":
+      return createOutcome(
+        "crossroads",
+        "把眼前的小买卖扩成更像样的局，逼更大的人物出手。",
+        {
+          wealth: 2,
+          favor: { gu_mingzhu: 1, ma_huichuan: 1 },
+          addFlags: ["entered_business_circle"],
+        },
+        ["expanded_trade_scope"],
+      );
+    case "secure_document":
+      return createOutcome(
+        "county_office",
+        "拿到能让自己站稳脚跟的文书，不再任人拿捏。",
+        {
+          reputation: 1,
+          wealth: -1,
+        },
+        ["secured_document"],
+      );
+    case "trade_information":
+      return createOutcome(
+        "crossroads",
+        "把消息变成官面上的方便，再顺势往更高处走。",
+        {
+          reputation: 1,
+          favor: { liu_sanniang: 1 },
+        },
+        ["traded_information"],
+      );
+    case "retreat_to_inn":
+      return createOutcome(
+        "inn",
+        "先退一步，在酒楼重新盘算，再决定下一步往哪边压。",
+        {
+          favor: { liu_sanniang: 1 },
+        },
+        ["retreated_to_inn"],
+      );
+    case "use_reputation_pressure":
+      return createOutcome(
+        "crossroads",
+        "借着现有名声逼对方正视你，换来更像样的机会。",
+        {
+          reputation: 1,
+        },
+        ["used_reputation_pressure"],
+      );
+    case "answer_high_level_invite":
+      return createOutcome(
+        "crossroads",
+        "赴一场更高层的邀约，把临河县的小局接到更大的桌上。",
+        {
+          reputation: 2,
+          favor: { gu_mingzhu: 1, shen_yanshu: 1 },
+          addFlags: ["heard_of_xiao_qingyi"],
+        },
+        ["answered_high_level_invite"],
+      );
+    default:
+      return null;
+  }
 }
 
 function mergeChoiceOutcome(base: ChoiceOutcome, extra: ChoiceOutcome): ChoiceOutcome {
@@ -480,12 +787,23 @@ export function buildFallbackTurnResult(state: GameState, choice: Choice, outcom
                   }
                 : {};
 
+  const summaryPrefix =
+    outcome.sceneId === "academy"
+      ? "书院线推进"
+      : outcome.sceneId === "dock"
+        ? "生意线推进"
+        : outcome.sceneId === "inn"
+          ? "消息线推进"
+          : outcome.sceneId === "county_office"
+            ? "官面线推进"
+            : "局势推进";
+
   return {
     narrative,
     choices: buildFallbackChoicesForScene(state),
     suggestedStateChanges: postTurnDelta,
     events: outcome.events,
-    summary: `${state.playerProfile.name}在${sceneName}继续推进局面，并拿到了下一步选择。`,
+    summary: `${summaryPrefix}：${state.playerProfile.name}通过“${choice.label}”把局面推进到了${sceneName}。`,
   };
 }
 
