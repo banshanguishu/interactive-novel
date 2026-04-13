@@ -1,4 +1,13 @@
-import type { SaveMeta, SaveSlot, StartGamePayload, TurnResult } from "./game.js";
+import type {
+  PlayerBackground,
+  PlayerTalent,
+  SaveMeta,
+  SaveSlot,
+  StartGameInput,
+  StartGamePayload,
+  StartingAsset,
+  TurnResult,
+} from "./game.js";
 
 export type HealthPayload = {
   status: "ok";
@@ -15,6 +24,12 @@ export type SaveListPayload = {
   slots: SaveMeta[];
 };
 
+export type GameSchemaPayload = {
+  backgrounds: readonly PlayerBackground[];
+  talents: readonly PlayerTalent[];
+  startingAssets: readonly StartingAsset[];
+};
+
 export type TurnStreamEnvelope = {
   type: "chunk" | "result" | "error";
   text?: string;
@@ -22,4 +37,5 @@ export type TurnStreamEnvelope = {
   error?: string;
 };
 
+export type StartGameRequest = StartGameInput;
 export type StartGameResponse = StartGamePayload;
