@@ -1,0 +1,17 @@
+node_modules
+.pnpm-store
+dist
+build
+.vite
+.turbo
+.DS_Store
+coverage
+*.log
+.env
+.env.local
+.env.*.local
+apps/*/node_modules
+apps/*/dist
+apps/*/build
+apps/*/.env
+saves
