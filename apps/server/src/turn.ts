@@ -462,6 +462,65 @@ function mergeChoiceOutcome(base: ChoiceOutcome, extra: ChoiceOutcome): ChoiceOu
   };
 }
 
+function getRecentSceneCount(state: GameState, sceneId: SceneId): number {
+  return state.recentScenes.slice(-3).filter((scene) => scene === sceneId).length;
+}
+
+function getBreakoutScene(state: GameState, currentScene: SceneId): SceneId {
+  switch (currentScene) {
+    case "academy":
+      return state.stats.reputation >= 4 ? "county_office" : "crossroads";
+    case "inn":
+      return state.stats.reputation >= 3 ? "academy" : "market";
+    case "dock":
+      return state.stats.wealth >= 5 ? "crossroads" : "inn";
+    case "market":
+      return state.stats.wealth >= 3 ? "dock" : "inn";
+    case "county_office":
+      return "crossroads";
+    case "crossroads":
+      return state.stats.reputation >= state.stats.wealth ? "academy" : "dock";
+    case "opening":
+    default:
+      return "inn";
+  }
+}
+
+function getBreakoutObjective(sceneId: SceneId): string {
+  switch (sceneId) {
+    case "academy":
+      return "别再原地消耗了，去书院把名声换成真正能往上走的台阶。";
+    case "dock":
+      return "局面需要新的变量，去码头把消息变成收益和合作。";
+    case "inn":
+      return "先回到消息场，换一条新线，不要在旧局里空转。";
+    case "market":
+      return "先把局面落到现实收益上，再谈下一步的名声和人情。";
+    case "county_office":
+      return "该把前面的名声和线索，推进到更有分量的官面节点了。";
+    case "crossroads":
+    default:
+      return "现在必须换一条路，把已有成果接到新的节点上。";
+  }
+}
+
+function enforceForwardMotion(state: GameState, outcome: ChoiceOutcome): ChoiceOutcome {
+  const repeated = getRecentSceneCount(state, outcome.sceneId);
+
+  if (repeated < 2) {
+    return outcome;
+  }
+
+  const breakoutScene = getBreakoutScene(state, outcome.sceneId);
+
+  return {
+    ...outcome,
+    sceneId: breakoutScene,
+    objective: getBreakoutObjective(breakoutScene),
+    events: uniqueStrings([...outcome.events, "loop_breaker_transition"]),
+  };
+}
+
 function syncDerivedStatus(state: GameState): void {
   const tags = new Set<StatusTag>(state.stats.statusTags);
 
@@ -808,7 +867,7 @@ export function buildFallbackTurnResult(state: GameState, choice: Choice, outcom
 }
 
 export function advanceStateForChoice(state: GameState, choice: Choice): ChoiceOutcome {
-  const outcome = buildChoiceOutcome(state, choice);
+  const outcome = enforceForwardMotion(state, buildChoiceOutcome(state, choice));
 
   applyStateDelta(state, outcome.preSceneDelta);
   state.progression.sceneId = outcome.sceneId;
@@ -832,6 +891,8 @@ export function finalizeTurnState(state: GameState, turn: TurnResult): void {
   applyStateDelta(state, turn.suggestedStateChanges);
   state.lastChoices = turn.choices;
   state.recentSummaries = [...state.recentSummaries, turn.summary].slice(-10);
+  state.recentScenes = [...state.recentScenes, state.progression.sceneId].slice(-6);
+  state.recentEvents = [...state.recentEvents, ...turn.events].slice(-12);
   state.lastUpdatedAt = new Date().toISOString();
 
   if (state.progression.chapterId === "chapter_2") {

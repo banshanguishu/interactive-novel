@@ -152,6 +152,8 @@ export function finalizeOpeningState(
   state.progression.turn = 1;
   state.lastChoices = opening.choices;
   state.recentSummaries = [opening.summary];
+  state.recentScenes = [state.progression.sceneId];
+  state.recentEvents = [...opening.events];
   state.lastUpdatedAt = new Date().toISOString();
 
   return { state, opening };

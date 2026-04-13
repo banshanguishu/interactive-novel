@@ -114,6 +114,8 @@ export type GameState = {
   stats: GameStats;
   storyFlags: StoryFlag[];
   recentSummaries: string[];
+  recentScenes: SceneId[];
+  recentEvents: string[];
   currentObjective: string;
   lastChoices: Choice[];
   lastUpdatedAt: string;
@@ -173,6 +175,8 @@ export function createEmptyGameState(input: StartGameInput): GameState {
     },
     storyFlags: [],
     recentSummaries: [],
+    recentScenes: ["opening"],
+    recentEvents: [],
     currentObjective: "先在临河县活下去，并找到第一个翻身机会。",
     lastChoices: [],
     lastUpdatedAt: new Date().toISOString(),

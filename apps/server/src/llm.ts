@@ -152,6 +152,24 @@ function parseTurnJson(rawJson: string, fallback: TurnResult): TurnResult {
   };
 }
 
+function normalizeForCompare(value: string): string {
+  return value.replace(/\s+/g, "").replace(/[，。、“”‘’：；！？,.!?]/g, "");
+}
+
+function looksRepetitive(state: GameState, candidate: TurnResult): boolean {
+  const normalizedSummary = normalizeForCompare(candidate.summary);
+  const recentSummaryHit = state.recentSummaries
+    .slice(-2)
+    .some((summary) => normalizeForCompare(summary) === normalizedSummary);
+
+  const repeatedChoices =
+    candidate.choices.filter((choice) => state.lastChoices.some((lastChoice) => lastChoice.label === choice.label)).length >= 2;
+
+  const repeatedScene = state.recentScenes.slice(-2).filter((scene) => scene === state.progression.sceneId).length >= 2;
+
+  return recentSummaryHit || (repeatedChoices && repeatedScene);
+}
+
 async function streamFallbackScene({ fallback, onTextChunk }: StreamSceneParams): Promise<StreamSceneResult> {
   for (const chunk of splitNarrativeForStreaming(fallback.narrative)) {
     await onTextChunk(chunk);
@@ -307,12 +325,17 @@ async function streamStructuredScene({
       ? parseTurnJson(rawBufferState.jsonBuffer.trim(), fallback)
       : fallback;
 
+  const useFallback = looksRepetitive(state, parsedTurn);
+  const finalTurn = useFallback ? fallback : parsedTurn;
+
   return {
-    source: "llm",
-    turn: {
-      ...parsedTurn,
-      narrative: rawBufferState.narrativeBuffer.trim() || fallback.narrative,
-    },
+    source: useFallback ? "fallback" : "llm",
+    turn: useFallback
+      ? fallback
+      : {
+          ...finalTurn,
+          narrative: rawBufferState.narrativeBuffer.trim() || fallback.narrative,
+        },
   };
 }
 
