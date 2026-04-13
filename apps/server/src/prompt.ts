@@ -52,6 +52,7 @@ export function buildTurnSystemPrompt(state: GameState, selectedChoice: Choice):
     '{"summary":"一句话摘要","events":["event_name"],"choices":[{"id":"choice_1","label":"中文选项标题","intent":"行动意图"}],"suggestedStateChanges":{"reputation":0,"wealth":0,"favor":{"liu_sanniang":0},"addTags":["崭露头角"]}}',
     "choices 数量必须为 3 个，最多 4 个。",
     "suggestedStateChanges 必须谨慎、轻量，数值变化通常在 -1 到 2 之间，不要夸张。",
+    "如果名望、钱财、NPC好感或状态标签已经足够高/低，下一轮选项必须体现这种差异，不能把高名望玩家和低名望玩家写得像同一人。",
     "每一轮都要有新信息、新风险或新机会，不能重复上一轮内容。",
     "不要替玩家做最终决定，必须把局面推到新的选择点。",
     `当前章节：${state.progression.chapterId}`,

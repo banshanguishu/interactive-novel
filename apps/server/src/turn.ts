@@ -29,13 +29,16 @@ function textContains(text: string, keywords: string[]): boolean {
 }
 
 function mergeDelta(base: StateDelta, extra: StateDelta): StateDelta {
+  const mergedFavor: NonNullable<StateDelta["favor"]> = { ...(base.favor ?? {}) };
+
+  for (const [key, value] of Object.entries(extra.favor ?? {})) {
+    mergedFavor[key as keyof typeof mergedFavor] = (mergedFavor[key as keyof typeof mergedFavor] ?? 0) + value;
+  }
+
   return {
     reputation: (base.reputation ?? 0) + (extra.reputation ?? 0),
     wealth: (base.wealth ?? 0) + (extra.wealth ?? 0),
-    favor: {
-      ...(base.favor ?? {}),
-      ...(extra.favor ?? {}),
-    },
+    favor: mergedFavor,
     addTags: uniqueStrings([...(base.addTags ?? []), ...(extra.addTags ?? [])]),
     removeTags: uniqueStrings([...(base.removeTags ?? []), ...(extra.removeTags ?? [])]),
     addItems: uniqueStrings([...(base.addItems ?? []), ...(extra.addItems ?? [])]),
@@ -65,6 +68,7 @@ export function buildChoiceOutcome(state: GameState, choice: Choice): ChoiceOutc
       objective: "从云来酒楼撬出临河县最有价值的消息。",
       preSceneDelta: {
         favor: { liu_sanniang: 1 },
+        reputation: state.stats.reputation >= 3 ? 1 : 0,
         addFlags: ["met_liu_sanniang"],
       },
       events: ["entered_inn_network"],
@@ -76,7 +80,8 @@ export function buildChoiceOutcome(state: GameState, choice: Choice): ChoiceOutc
       sceneId: "market",
       objective: "先把温饱和立足问题处理掉，再从早市里找第一个机会。",
       preSceneDelta: {
-        wealth: 1,
+        wealth: state.stats.wealth <= 2 ? 2 : 1,
+        addTags: state.stats.wealth <= 1 ? ["手头拮据"] : [],
       },
       events: ["entered_market_loop"],
     });
@@ -87,10 +92,10 @@ export function buildChoiceOutcome(state: GameState, choice: Choice): ChoiceOutc
       sceneId: "academy",
       objective: "用才学在书院圈子里打开局面，换一张往上走的门票。",
       preSceneDelta: {
-        reputation: 1,
-        favor: { shen_yanshu: 1 },
+        reputation: state.playerProfile.talent === "诗词才情" ? 2 : 1,
+        favor: { shen_yanshu: state.stats.reputation >= 3 ? 2 : 1 },
         addTags: ["得书院赏识"],
-        addFlags: ["met_shen_yanshu", "entered_academy_circle"],
+        addFlags: ["met_shen_yanshu", "entered_academy_circle", "gained_local_reputation"],
       },
       events: ["entered_academy_circle"],
     });
@@ -101,8 +106,11 @@ export function buildChoiceOutcome(state: GameState, choice: Choice): ChoiceOutc
       sceneId: "dock",
       objective: "把一次买卖做成，让临河县真正有人开始记住你的本事。",
       preSceneDelta: {
-        wealth: 2,
-        favor: { ma_huichuan: 1, gu_mingzhu: text.includes("顾") ? 1 : 0 },
+        wealth: state.playerProfile.talent === "商业头脑" ? 3 : 2,
+        favor: {
+          ma_huichuan: 1,
+          gu_mingzhu: text.includes("顾") || state.stats.wealth >= 4 ? 1 : 0,
+        },
         addFlags: ["met_ma_huichuan", "entered_business_circle"],
       },
       events: ["entered_business_circle"],
@@ -116,6 +124,8 @@ export function buildChoiceOutcome(state: GameState, choice: Choice): ChoiceOutc
       preSceneDelta: {
         reputation: 1,
         addTags: ["欠下人情"],
+        addItems: state.stats.inventory.includes("旧人情信") ? ["密约线索"] : [],
+        removeItems: state.stats.inventory.includes("旧人情信") ? ["旧人情信"] : [],
         addFlags: ["heard_of_xiao_qingyi"],
       },
       events: ["used_social_leverage"],
@@ -143,6 +153,37 @@ function mergeChoiceOutcome(base: ChoiceOutcome, extra: ChoiceOutcome): ChoiceOu
     preSceneDelta: mergeDelta(base.preSceneDelta, extra.preSceneDelta),
     events: uniqueStrings([...base.events, ...extra.events]),
   };
+}
+
+function syncDerivedStatus(state: GameState): void {
+  const tags = new Set<StatusTag>(state.stats.statusTags);
+
+  if (state.stats.reputation >= 3) {
+    tags.add("小有名气");
+    state.storyFlags = uniqueStrings([...state.storyFlags, "gained_local_reputation"]);
+  } else {
+    tags.delete("小有名气");
+  }
+
+  if (state.stats.reputation >= 6 || state.stats.favor.shen_yanshu >= 3 || state.stats.favor.gu_mingzhu >= 3) {
+    tags.add("崭露头角");
+  }
+
+  if (state.stats.wealth <= 1) {
+    tags.add("手头拮据");
+  } else {
+    tags.delete("手头拮据");
+  }
+
+  if (state.storyFlags.includes("met_ma_huichuan") && state.stats.reputation >= 4) {
+    tags.add("被豪强盯上");
+  }
+
+  if (state.storyFlags.includes("met_shen_yanshu") || state.stats.favor.shen_yanshu >= 2) {
+    tags.add("得书院赏识");
+  }
+
+  state.stats.statusTags = [...tags];
 }
 
 export function applyStateDelta(state: GameState, delta: StateDelta): void {
@@ -175,12 +216,14 @@ export function applyStateDelta(state: GameState, delta: StateDelta): void {
   if (delta.addFlags?.length) {
     state.storyFlags = uniqueStrings([...state.storyFlags, ...delta.addFlags]);
   }
+
+  syncDerivedStatus(state);
 }
 
 function buildFallbackChoicesForScene(state: GameState): Choice[] {
   switch (state.progression.sceneId) {
-    case "inn":
-      return [
+    case "inn": {
+      const choices: Choice[] = [
         {
           id: "ask_liu_for_rumor",
           label: "请柳三娘指一条最值得押注的线",
@@ -197,8 +240,19 @@ function buildFallbackChoicesForScene(state: GameState): Choice[] {
           intent: "用才情制造存在感，看看谁会先注意到你。",
         },
       ];
-    case "market":
-      return [
+
+      if (state.stats.favor.liu_sanniang >= 2) {
+        choices.push({
+          id: "liu_private_lead",
+          label: "让柳三娘私下引你见一位真正有用的人",
+          intent: "把她对你的好感换成一次高价值引荐。",
+        });
+      }
+
+      return choices.slice(0, 4);
+    }
+    case "market": {
+      const choices: Choice[] = [
         {
           id: "barter_for_profit",
           label: "靠算账和讲价先赚一笔小钱",
@@ -215,8 +269,19 @@ function buildFallbackChoicesForScene(state: GameState): Choice[] {
           intent: "把早市里的零碎消息串成更大的机会。",
         },
       ];
-    case "academy":
-      return [
+
+      if (state.stats.wealth >= 4) {
+        choices.push({
+          id: "buy_information_bundle",
+          label: "花点小钱收一圈消息，省得瞎闯",
+          intent: "把手里的钱直接换成更高质量的情报。",
+        });
+      }
+
+      return choices.slice(0, 4);
+    }
+    case "academy": {
+      const choices: Choice[] = [
         {
           id: "join_poetry_gathering",
           label: "主动接下文会上的即兴题目",
@@ -233,8 +298,19 @@ function buildFallbackChoicesForScene(state: GameState): Choice[] {
           intent: "避免刚露头就被人借机压下去。",
         },
       ];
-    case "dock":
-      return [
+
+      if (state.stats.reputation >= 4 || state.stats.favor.shen_yanshu >= 2) {
+        choices.push({
+          id: "accept_patron_notice",
+          label: "顺势接下一位贵人递来的试探",
+          intent: "把书院里的名声变成更高层的敲门砖。",
+        });
+      }
+
+      return choices.slice(0, 4);
+    }
+    case "dock": {
+      const choices: Choice[] = [
         {
           id: "pitch_business_plan",
           label: "拿出更清晰的分账法说服码头上的人",
@@ -251,8 +327,19 @@ function buildFallbackChoicesForScene(state: GameState): Choice[] {
           intent: "弄清楚这条地头蛇是短期靠山还是长期隐患。",
         },
       ];
-    case "county_office":
-      return [
+
+      if (state.stats.wealth >= 5 || state.stats.favor.gu_mingzhu >= 2) {
+        choices.push({
+          id: "expand_trade_scope",
+          label: "把眼前生意扩成一条更像样的路子",
+          intent: "趁势扩大盘子，让顾家或更大的买卖注意到你。",
+        });
+      }
+
+      return choices.slice(0, 4);
+    }
+    case "county_office": {
+      const choices: Choice[] = [
         {
           id: "secure_document",
           label: "想办法拿到一份能自保的文书",
@@ -269,10 +356,20 @@ function buildFallbackChoicesForScene(state: GameState): Choice[] {
           intent: "避免在官面上用力过猛，把局面做死。",
         },
       ];
+      if (state.stats.reputation >= 4) {
+        choices.push({
+          id: "use_reputation_pressure",
+          label: "借你现有的名声逼对方正眼看你",
+          intent: "让县衙明白，你已经不是可以随便打发的小人物。",
+        });
+      }
+
+      return choices.slice(0, 4);
+    }
     case "crossroads":
     case "opening":
-    default:
-      return [
+    default: {
+      const choices: Choice[] = [
         {
           id: "return_to_inn",
           label: "回酒楼重新摸清局势",
@@ -289,6 +386,16 @@ function buildFallbackChoicesForScene(state: GameState): Choice[] {
           intent: "先让手里有钱，再去谈更大的局。",
         },
       ];
+      if (state.progression.chapterId === "chapter_2" || state.stats.reputation >= 5) {
+        choices.push({
+          id: "answer_high_level_invite",
+          label: "赴一场只对有名头之人开放的邀约",
+          intent: "试着把临河县的小局，接到更高层的人情和权力桌上。",
+        });
+      }
+
+      return choices.slice(0, 4);
+    }
   }
 }
 
@@ -304,6 +411,20 @@ export function buildFallbackTurnResult(state: GameState, choice: Choice, outcom
   };
 
   const sceneName = sceneNameMap[outcome.sceneId];
+  const strongestRelation = Object.entries(state.stats.favor)
+    .sort((a, b) => b[1] - a[1])[0];
+  const strongestRelationText =
+    strongestRelation && strongestRelation[1] > 0
+      ? `此刻对你态度最松动的人，是${strongestRelation[0] === "shen_yanshu"
+          ? "沈砚书"
+          : strongestRelation[0] === "gu_mingzhu"
+            ? "顾明珠"
+            : strongestRelation[0] === "liu_sanniang"
+              ? "柳三娘"
+              : strongestRelation[0] === "ma_huichuan"
+                ? "马会川"
+                : "萧清漪"}。`
+      : "暂时还没人真正站在你这边，你只能继续靠自己争出位置。";
   const leadText =
     outcome.sceneId === "inn"
       ? "酒香、人声和试探意味一起涌来。"
@@ -322,16 +443,47 @@ export function buildFallbackTurnResult(state: GameState, choice: Choice, outcom
     leadText,
     "你没有真正的身份庇护，只能靠反应、姿态和一点点比旁人更快的判断抢位置。",
     `这一步让局面开始偏向你：名望来到 ${state.stats.reputation}，钱财来到 ${state.stats.wealth}，而临河县里也已经有人开始记住你的名字。`,
+    `眼下你的状态标签是：${state.stats.statusTags.join("、") || "暂无"}。${strongestRelationText}`,
     "可你也看得明白，任何一次出头都不只是机会，往往也会顺手带来新的试探、嫉妒和讨价还价。",
     state.progression.chapterId === "chapter_1"
       ? "你现在最重要的，不是一次性赢得太多，而是把这个小机会稳稳接住，变成下一步能用的人情、名声或生意。"
       : "你已经不再只是求生了。眼下更关键的是，如何让临河县里真正有分量的人觉得，不拉你一把就会错过什么。",
   ].join("");
 
+  const postTurnDelta: StateDelta =
+    outcome.sceneId === "inn"
+      ? {
+          favor: { liu_sanniang: 1 },
+          reputation: state.stats.reputation >= 3 ? 1 : 0,
+        }
+      : outcome.sceneId === "market"
+        ? {
+            wealth: state.stats.wealth <= 3 ? 1 : 0,
+          }
+        : outcome.sceneId === "academy"
+          ? {
+              reputation: 1,
+              favor: { shen_yanshu: 1 },
+            }
+          : outcome.sceneId === "dock"
+            ? {
+                wealth: 1,
+                favor: { ma_huichuan: 1, gu_mingzhu: state.stats.favor.gu_mingzhu >= 1 ? 1 : 0 },
+              }
+            : outcome.sceneId === "county_office"
+              ? {
+                  reputation: 1,
+                }
+              : state.stats.reputation >= 4
+                ? {
+                    reputation: 1,
+                  }
+                : {};
+
   return {
     narrative,
     choices: buildFallbackChoicesForScene(state),
-    suggestedStateChanges: {},
+    suggestedStateChanges: postTurnDelta,
     events: outcome.events,
     summary: `${state.playerProfile.name}在${sceneName}继续推进局面，并拿到了下一步选择。`,
   };
@@ -363,6 +515,13 @@ export function finalizeTurnState(state: GameState, turn: TurnResult): void {
   state.lastChoices = turn.choices;
   state.recentSummaries = [...state.recentSummaries, turn.summary].slice(-10);
   state.lastUpdatedAt = new Date().toISOString();
+
+  if (state.progression.chapterId === "chapter_2") {
+    state.currentObjective =
+      state.stats.reputation >= 6 || state.stats.favor.gu_mingzhu >= 3
+        ? "你的名字已经开始往更高层传开，接下来要把名声换成真正站得住的靠山。"
+        : "你已经摸到更高层的门槛，接下来要让人看见你不只是昙花一现。";
+  }
 }
 
 export function validateTurnRequest(input: unknown): input is TurnRequest {

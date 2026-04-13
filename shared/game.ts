@@ -24,6 +24,14 @@ export type StartingAsset = (typeof STARTING_ASSETS)[number];
 export type NpcId = (typeof CORE_NPC_IDS)[number];
 export type ChapterId = (typeof CHAPTER_IDS)[number];
 
+export const NPC_LABELS: Record<NpcId, string> = {
+  shen_yanshu: "沈砚书",
+  gu_mingzhu: "顾明珠",
+  liu_sanniang: "柳三娘",
+  ma_huichuan: "马会川",
+  xiao_qingyi: "萧清漪",
+};
+
 export type SceneId =
   | "opening"
   | "market"

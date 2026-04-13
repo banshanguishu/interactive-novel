@@ -8,6 +8,7 @@ import type {
   TurnStreamEnvelope,
 } from "../../../shared/api.js";
 import {
+  NPC_LABELS,
   PLAYER_BACKGROUNDS,
   PLAYER_TALENTS,
   STARTING_ASSETS,
@@ -16,6 +17,83 @@ import {
 } from "../../../shared/game.js";
 
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:3001";
+
+type StateChangeItem = {
+  label: string;
+  value: string;
+};
+
+function describeStateChanges(previous: GameState | null, next: GameState): StateChangeItem[] {
+  if (!previous) {
+    return [
+      { label: "开局建立", value: "已生成初始人物、数值和首轮选择" },
+      { label: "名望", value: `${next.stats.reputation}` },
+      { label: "钱财", value: `${next.stats.wealth}` },
+    ];
+  }
+
+  const changes: StateChangeItem[] = [];
+  const reputationDiff = next.stats.reputation - previous.stats.reputation;
+  const wealthDiff = next.stats.wealth - previous.stats.wealth;
+
+  if (reputationDiff !== 0) {
+    changes.push({
+      label: "名望",
+      value: `${reputationDiff > 0 ? "+" : ""}${reputationDiff} -> ${next.stats.reputation}`,
+    });
+  }
+
+  if (wealthDiff !== 0) {
+    changes.push({
+      label: "钱财",
+      value: `${wealthDiff > 0 ? "+" : ""}${wealthDiff} -> ${next.stats.wealth}`,
+    });
+  }
+
+  for (const [npcId, nextFavor] of Object.entries(next.stats.favor)) {
+    const previousFavor = previous.stats.favor[npcId as keyof typeof previous.stats.favor] ?? 0;
+    const diff = nextFavor - previousFavor;
+
+    if (diff !== 0) {
+      changes.push({
+        label: NPC_LABELS[npcId as keyof typeof NPC_LABELS],
+        value: `好感 ${diff > 0 ? "+" : ""}${diff} -> ${nextFavor}`,
+      });
+    }
+  }
+
+  const addedTags = next.stats.statusTags.filter((tag) => !previous.stats.statusTags.includes(tag));
+  if (addedTags.length > 0) {
+    changes.push({
+      label: "新增状态",
+      value: addedTags.join(" / "),
+    });
+  }
+
+  const addedItems = next.stats.inventory.filter((item) => !previous.stats.inventory.includes(item));
+  if (addedItems.length > 0) {
+    changes.push({
+      label: "新增道具",
+      value: addedItems.join(" / "),
+    });
+  }
+
+  if (next.progression.chapterId !== previous.progression.chapterId) {
+    changes.push({
+      label: "章节变化",
+      value: `${previous.progression.chapterId} -> ${next.progression.chapterId}`,
+    });
+  }
+
+  if (changes.length === 0) {
+    changes.push({
+      label: "本轮状态",
+      value: "无显式数值变化，但剧情已推进",
+    });
+  }
+
+  return changes;
+}
 
 export default function App() {
   const [health, setHealth] = useState<HealthPayload | null>(null);
@@ -28,6 +106,7 @@ export default function App() {
   const [currentTurn, setCurrentTurn] = useState<TurnResult | null>(null);
   const [streamedNarrative, setStreamedNarrative] = useState("");
   const [turnSource, setTurnSource] = useState<"llm" | "fallback" | null>(null);
+  const [latestStateChanges, setLatestStateChanges] = useState<StateChangeItem[]>([]);
   const [form, setForm] = useState<StartGameRequest>({
     name: "韩小满",
     background: PLAYER_BACKGROUNDS[0],
@@ -126,6 +205,7 @@ export default function App() {
             if (envelope.type === "result") {
               const payload = envelope.payload as StartGameResponse;
               setTurnSource(envelope.source);
+              setLatestStateChanges(describeStateChanges(null, payload.state));
               setGameState(payload.state);
               setCurrentTurn(payload.opening);
             }
@@ -213,6 +293,7 @@ export default function App() {
 
             if (envelope.type === "result" && envelope.payload) {
               setTurnSource(envelope.source ?? "fallback");
+              setLatestStateChanges(describeStateChanges(gameState, envelope.payload.state));
               setGameState(envelope.payload.state);
               setCurrentTurn(envelope.payload.turn);
             }
@@ -386,11 +467,54 @@ export default function App() {
               </article>
 
               <article className="rounded-3xl border border-stone-800 bg-stone-900/70 p-6">
+                <h2 className="text-lg font-semibold text-stone-100">关键关系</h2>
+                <div className="mt-4 space-y-3 text-sm text-stone-300">
+                  {Object.entries(gameState.stats.favor).map(([npcId, value]) => (
+                    <div key={npcId} className="space-y-1">
+                      <div className="flex items-center justify-between">
+                        <span>{NPC_LABELS[npcId as keyof typeof NPC_LABELS]}</span>
+                        <span className="text-stone-400">{value}</span>
+                      </div>
+                      <div className="h-2 rounded-full bg-stone-800">
+                        <div
+                          className="h-2 rounded-full bg-amber-400 transition-all"
+                          style={{ width: `${Math.max(8, Math.min(100, (value + 10) * 3.2))}%` }}
+                        />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </article>
+
+              <article className="rounded-3xl border border-stone-800 bg-stone-900/70 p-6">
+                <h2 className="text-lg font-semibold text-stone-100">本轮变化</h2>
+                <div className="mt-4 space-y-3 text-sm leading-7 text-stone-300">
+                  {latestStateChanges.map((change) => (
+                    <div key={`${change.label}-${change.value}`} className="rounded-2xl border border-stone-800 bg-stone-950/70 px-4 py-3">
+                      <p className="text-xs uppercase tracking-[0.2em] text-stone-500">{change.label}</p>
+                      <p className="mt-1 text-stone-200">{change.value}</p>
+                    </div>
+                  ))}
+                </div>
+              </article>
+
+              <article className="rounded-3xl border border-stone-800 bg-stone-900/70 p-6">
                 <h2 className="text-lg font-semibold text-stone-100">当前回合摘要</h2>
                 <p className="mt-3 text-sm leading-7 text-stone-300">{currentTurn.summary}</p>
                 <p className="mt-3 text-xs uppercase tracking-[0.24em] text-stone-500">
                   内容来源：{turnSource === "llm" ? "LLM 流式生成" : "本地回退生成"}
                 </p>
+              </article>
+
+              <article className="rounded-3xl border border-stone-800 bg-stone-900/70 p-6">
+                <h2 className="text-lg font-semibold text-stone-100">最近推进</h2>
+                <div className="mt-4 space-y-2 text-sm leading-7 text-stone-300">
+                  {gameState.recentSummaries.slice(-4).reverse().map((summary) => (
+                    <p key={summary} className="rounded-2xl border border-stone-800 bg-stone-950/70 px-4 py-3">
+                      {summary}
+                    </p>
+                  ))}
+                </div>
               </article>
             </aside>
 
