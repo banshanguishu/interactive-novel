@@ -23,6 +23,16 @@ type StateChangeItem = {
   value: string;
 };
 
+const ANCHOR_LABELS: Record<GameState["currentAnchorId"], string> = {
+  ch1_survive: "先活下去",
+  ch1_first_contact: "接触关键人物",
+  ch1_first_gain: "拿到第一份收益",
+  ch1_choose_track: "确定上升路线",
+  ch2_raise_stakes: "提高赌注",
+  ch2_secure_backer: "争取靠山",
+  ch2_power_entry: "进入更高层棋局",
+};
+
 function describeStateChanges(previous: GameState | null, next: GameState): StateChangeItem[] {
   if (!previous) {
     return [
@@ -462,6 +472,8 @@ export default function App() {
                   <p>开局资源：{gameState.playerProfile.startingAsset}</p>
                   <p>章节：{gameState.progression.chapterId}</p>
                   <p>回合：{gameState.progression.turn}</p>
+                  <p>剧情锚点：{ANCHOR_LABELS[gameState.currentAnchorId]}</p>
+                  <p>锚点停滞轮次：{gameState.turnsSinceAnchorAdvance}</p>
                   <p>目标：{gameState.currentObjective}</p>
                   <p>名望：{gameState.stats.reputation}</p>
                   <p>钱财：{gameState.stats.wealth}</p>
@@ -473,6 +485,7 @@ export default function App() {
               <article className="rounded-3xl border border-stone-800 bg-stone-900/70 p-6">
                 <h2 className="text-lg font-semibold text-stone-100">当前阶段</h2>
                 <p className="mt-3 text-sm leading-7 text-stone-300">
+                  当前锚点是“{ANCHOR_LABELS[gameState.currentAnchorId]}”。
                   {gameState.progression.chapterId === "chapter_1"
                     ? "当前仍处于草民立足阶段，重点是先获得第一个稳定的人脉、名声或赚钱口子。"
                     : "当前已进入初露锋芒阶段，重点是把已有名声和资源换成更高层的机会。"}

@@ -150,6 +150,7 @@ export function finalizeOpeningState(
   opening: StartGamePayload["opening"],
 ): StartGamePayload {
   state.progression.turn = 1;
+  state.currentAnchorId = "ch1_survive";
   state.lastChoices = opening.choices;
   state.recentSummaries = [opening.summary];
   state.recentScenes = [state.progression.sceneId];

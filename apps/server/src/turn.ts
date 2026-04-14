@@ -1,5 +1,14 @@
 import type { TurnRequest } from "../../../shared/api.js";
-import type { Choice, GameState, SceneId, StateDelta, StatusTag, StoryFlag, TurnResult } from "../../../shared/game.js";
+import type {
+  ChapterAnchorId,
+  Choice,
+  GameState,
+  SceneId,
+  StateDelta,
+  StatusTag,
+  StoryFlag,
+  TurnResult,
+} from "../../../shared/game.js";
 
 type ChoiceOutcome = {
   sceneId: SceneId;
@@ -7,6 +16,16 @@ type ChoiceOutcome = {
   preSceneDelta: StateDelta;
   events: string[];
 };
+
+const ANCHOR_SEQUENCE: ChapterAnchorId[] = [
+  "ch1_survive",
+  "ch1_first_contact",
+  "ch1_first_gain",
+  "ch1_choose_track",
+  "ch2_raise_stakes",
+  "ch2_secure_backer",
+  "ch2_power_entry",
+];
 
 function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
@@ -40,6 +59,217 @@ function createOutcome(
     preSceneDelta,
     events,
   };
+}
+
+function getAnchorLabel(anchorId: ChapterAnchorId): string {
+  switch (anchorId) {
+    case "ch1_survive":
+      return "先活下去";
+    case "ch1_first_contact":
+      return "接触关键人物";
+    case "ch1_first_gain":
+      return "拿到第一份收益";
+    case "ch1_choose_track":
+      return "确定上升路线";
+    case "ch2_raise_stakes":
+      return "局势升级";
+    case "ch2_secure_backer":
+      return "争取靠山";
+    case "ch2_power_entry":
+      return "进入更高层棋局";
+  }
+}
+
+function getAnchorObjective(anchorId: ChapterAnchorId): string {
+  switch (anchorId) {
+    case "ch1_survive":
+      return "先解决温饱和落脚问题，别让穿越第一天就把自己耗死。";
+    case "ch1_first_contact":
+      return "尽快接触一个真正有分量的关键人物，别只在边缘打转。";
+    case "ch1_first_gain":
+      return "把眼前的聪明才智换成第一份真实收益或实打实的人情。";
+    case "ch1_choose_track":
+      return "你必须开始明确自己要走书院线、消息线还是生意线。";
+    case "ch2_raise_stakes":
+      return "局势已经升级，下一步必须出现更高层的试探、邀约或压迫。";
+    case "ch2_secure_backer":
+      return "想继续往上走，必须争取到能替你站台的人。";
+    case "ch2_power_entry":
+      return "你已经摸到更高层门槛，下一步要真正踏入更大的局。";
+  }
+}
+
+function getAnchorPreferredScenes(anchorId: ChapterAnchorId): SceneId[] {
+  switch (anchorId) {
+    case "ch1_survive":
+      return ["market", "inn"];
+    case "ch1_first_contact":
+      return ["inn", "academy", "dock"];
+    case "ch1_first_gain":
+      return ["market", "dock", "academy"];
+    case "ch1_choose_track":
+      return ["academy", "dock", "crossroads"];
+    case "ch2_raise_stakes":
+      return ["county_office", "academy", "dock"];
+    case "ch2_secure_backer":
+      return ["academy", "county_office", "crossroads"];
+    case "ch2_power_entry":
+      return ["crossroads", "county_office", "inn"];
+  }
+}
+
+function getNextAnchor(anchorId: ChapterAnchorId): ChapterAnchorId | null {
+  const index = ANCHOR_SEQUENCE.indexOf(anchorId);
+  if (index < 0 || index === ANCHOR_SEQUENCE.length - 1) {
+    return null;
+  }
+  return ANCHOR_SEQUENCE[index + 1] ?? null;
+}
+
+function resolveAnchorAdvance(state: GameState): ChapterAnchorId | null {
+  switch (state.currentAnchorId) {
+    case "ch1_survive":
+      return state.storyFlags.some((flag) =>
+        ["met_shen_yanshu", "met_gu_mingzhu", "met_liu_sanniang", "met_ma_huichuan"].includes(flag),
+      )
+        ? "ch1_first_contact"
+        : null;
+    case "ch1_first_contact":
+      return state.stats.reputation >= 3 ||
+        state.stats.wealth >= 3 ||
+        state.storyFlags.includes("earned_first_silver") ||
+        state.stats.inventory.includes("密约线索")
+        ? "ch1_first_gain"
+        : null;
+    case "ch1_first_gain":
+      return state.storyFlags.includes("entered_academy_circle") ||
+        state.storyFlags.includes("entered_business_circle") ||
+        state.stats.favor.shen_yanshu >= 2 ||
+        state.stats.favor.gu_mingzhu >= 2 ||
+        state.stats.favor.ma_huichuan >= 2
+        ? "ch1_choose_track"
+        : null;
+    case "ch1_choose_track":
+      return state.progression.turn >= 6 || state.stats.reputation >= 4 || state.storyFlags.includes("entered_business_circle")
+        ? "ch2_raise_stakes"
+        : null;
+    case "ch2_raise_stakes":
+      return state.stats.favor.shen_yanshu >= 3 ||
+        state.stats.favor.gu_mingzhu >= 3 ||
+        state.storyFlags.includes("heard_of_xiao_qingyi")
+        ? "ch2_secure_backer"
+        : null;
+    case "ch2_secure_backer":
+      return state.stats.reputation >= 6 ||
+        (state.stats.favor.gu_mingzhu >= 3 && state.stats.wealth >= 6) ||
+        (state.stats.favor.shen_yanshu >= 3 && state.stats.reputation >= 5)
+        ? "ch2_power_entry"
+        : null;
+    case "ch2_power_entry":
+    default:
+      return null;
+  }
+}
+
+function getAnchorForcingOutcome(state: GameState): ChoiceOutcome {
+  switch (state.currentAnchorId) {
+    case "ch1_survive":
+      return createOutcome(
+        "market",
+        getAnchorObjective("ch1_survive"),
+        {
+          wealth: 1,
+          addFlags: state.storyFlags.includes("earned_first_silver") ? [] : ["earned_first_silver"],
+        },
+        ["anchor_progress_survive"],
+      );
+    case "ch1_first_contact":
+      return createOutcome(
+        "inn",
+        getAnchorObjective("ch1_first_contact"),
+        {
+          reputation: 1,
+          favor: { liu_sanniang: 1, shen_yanshu: state.stats.favor.shen_yanshu > 0 ? 1 : 0 },
+          addFlags: ["met_liu_sanniang"],
+        },
+        ["anchor_progress_contact"],
+      );
+    case "ch1_first_gain":
+      return createOutcome(
+        "dock",
+        getAnchorObjective("ch1_first_gain"),
+        {
+          wealth: 2,
+          favor: { ma_huichuan: 1 },
+          addFlags: ["earned_first_silver", "met_ma_huichuan"],
+        },
+        ["anchor_progress_gain"],
+      );
+    case "ch1_choose_track":
+      return state.stats.reputation >= state.stats.wealth
+        ? createOutcome(
+            "academy",
+            getAnchorObjective("ch1_choose_track"),
+            {
+              reputation: 1,
+              favor: { shen_yanshu: 1 },
+              addFlags: ["entered_academy_circle", "met_shen_yanshu"],
+            },
+            ["anchor_progress_track_academy"],
+          )
+        : createOutcome(
+            "dock",
+            getAnchorObjective("ch1_choose_track"),
+            {
+              wealth: 1,
+              favor: { gu_mingzhu: 1, ma_huichuan: 1 },
+              addFlags: ["entered_business_circle", "met_gu_mingzhu"],
+            },
+            ["anchor_progress_track_business"],
+          );
+    case "ch2_raise_stakes":
+      return createOutcome(
+        "county_office",
+        getAnchorObjective("ch2_raise_stakes"),
+        {
+          reputation: 1,
+          addFlags: ["heard_of_xiao_qingyi"],
+        },
+        ["anchor_progress_raise_stakes"],
+      );
+    case "ch2_secure_backer":
+      return state.stats.favor.shen_yanshu >= state.stats.favor.gu_mingzhu
+        ? createOutcome(
+            "academy",
+            getAnchorObjective("ch2_secure_backer"),
+            {
+              reputation: 1,
+              favor: { shen_yanshu: 1 },
+              addFlags: ["met_shen_yanshu"],
+            },
+            ["anchor_progress_secure_backer_academy"],
+          )
+        : createOutcome(
+            "crossroads",
+            getAnchorObjective("ch2_secure_backer"),
+            {
+              wealth: 1,
+              favor: { gu_mingzhu: 1 },
+              addFlags: ["met_gu_mingzhu"],
+            },
+            ["anchor_progress_secure_backer_business"],
+          );
+    case "ch2_power_entry":
+      return createOutcome(
+        "county_office",
+        getAnchorObjective("ch2_power_entry"),
+        {
+          reputation: 1,
+          favor: { xiao_qingyi: 1 },
+        },
+        ["anchor_progress_power_entry"],
+      );
+  }
 }
 
 function mergeDelta(base: StateDelta, extra: StateDelta): StateDelta {
@@ -177,6 +407,102 @@ export function buildChoiceOutcome(state: GameState, choice: Choice): ChoiceOutc
 
 function buildExactChoiceOutcome(state: GameState, choiceId: string): ChoiceOutcome | null {
   switch (choiceId) {
+    case "anchor_secure_basics":
+      return createOutcome(
+        "market",
+        getAnchorObjective("ch1_survive"),
+        {
+          wealth: 1,
+          addFlags: ["earned_first_silver"],
+        },
+        ["anchor_choice_survive"],
+      );
+    case "anchor_meet_key_figure":
+      return createOutcome(
+        "inn",
+        getAnchorObjective("ch1_first_contact"),
+        {
+          reputation: 1,
+          favor: { liu_sanniang: 1 },
+          addFlags: ["met_liu_sanniang"],
+        },
+        ["anchor_choice_contact"],
+      );
+    case "anchor_take_real_gain":
+      return createOutcome(
+        "dock",
+        getAnchorObjective("ch1_first_gain"),
+        {
+          wealth: 2,
+          favor: { ma_huichuan: 1 },
+          addFlags: ["earned_first_silver", "met_ma_huichuan"],
+        },
+        ["anchor_choice_gain"],
+      );
+    case "anchor_choose_track":
+      return state.stats.reputation >= state.stats.wealth
+        ? createOutcome(
+            "academy",
+            getAnchorObjective("ch1_choose_track"),
+            {
+              reputation: 1,
+              favor: { shen_yanshu: 1 },
+              addFlags: ["entered_academy_circle", "met_shen_yanshu"],
+            },
+            ["anchor_choice_track_academy"],
+          )
+        : createOutcome(
+            "dock",
+            getAnchorObjective("ch1_choose_track"),
+            {
+              wealth: 1,
+              favor: { gu_mingzhu: 1, ma_huichuan: 1 },
+              addFlags: ["entered_business_circle", "met_gu_mingzhu"],
+            },
+            ["anchor_choice_track_business"],
+          );
+    case "anchor_raise_stakes":
+      return createOutcome(
+        "county_office",
+        getAnchorObjective("ch2_raise_stakes"),
+        {
+          reputation: 1,
+          addFlags: ["heard_of_xiao_qingyi"],
+        },
+        ["anchor_choice_raise_stakes"],
+      );
+    case "anchor_secure_backer":
+      return state.stats.favor.shen_yanshu >= state.stats.favor.gu_mingzhu
+        ? createOutcome(
+            "academy",
+            getAnchorObjective("ch2_secure_backer"),
+            {
+              reputation: 1,
+              favor: { shen_yanshu: 1 },
+              addFlags: ["met_shen_yanshu"],
+            },
+            ["anchor_choice_secure_backer_academy"],
+          )
+        : createOutcome(
+            "crossroads",
+            getAnchorObjective("ch2_secure_backer"),
+            {
+              wealth: 1,
+              favor: { gu_mingzhu: 1 },
+              addFlags: ["met_gu_mingzhu"],
+            },
+            ["anchor_choice_secure_backer_business"],
+          );
+    case "anchor_power_entry":
+      return createOutcome(
+        "county_office",
+        getAnchorObjective("ch2_power_entry"),
+        {
+          reputation: 1,
+          favor: { xiao_qingyi: 1 },
+        },
+        ["anchor_choice_power_entry"],
+      );
     case "head_to_inn":
     case "return_to_inn":
       return createOutcome(
@@ -467,6 +793,13 @@ function getRecentSceneCount(state: GameState, sceneId: SceneId): number {
 }
 
 function getBreakoutScene(state: GameState, currentScene: SceneId): SceneId {
+  const preferred = getAnchorPreferredScenes(state.currentAnchorId);
+
+  const preferredAlternative = preferred.find((scene) => scene !== currentScene);
+  if (preferredAlternative) {
+    return preferredAlternative;
+  }
+
   switch (currentScene) {
     case "academy":
       return state.stats.reputation >= 4 ? "county_office" : "crossroads";
@@ -507,7 +840,7 @@ function getBreakoutObjective(sceneId: SceneId): string {
 function enforceForwardMotion(state: GameState, outcome: ChoiceOutcome): ChoiceOutcome {
   const repeated = getRecentSceneCount(state, outcome.sceneId);
 
-  if (repeated < 2) {
+  if (repeated < 2 && state.turnsSinceAnchorAdvance < 2) {
     return outcome;
   }
 
@@ -516,8 +849,8 @@ function enforceForwardMotion(state: GameState, outcome: ChoiceOutcome): ChoiceO
   return {
     ...outcome,
     sceneId: breakoutScene,
-    objective: getBreakoutObjective(breakoutScene),
-    events: uniqueStrings([...outcome.events, "loop_breaker_transition"]),
+    objective: `${getAnchorObjective(state.currentAnchorId)} ${getBreakoutObjective(breakoutScene)}`,
+    events: uniqueStrings([...outcome.events, "loop_breaker_transition", `anchor_guard_${state.currentAnchorId}`]),
   };
 }
 
@@ -587,6 +920,8 @@ export function applyStateDelta(state: GameState, delta: StateDelta): void {
 }
 
 function buildFallbackChoicesForScene(state: GameState): Choice[] {
+  const anchorChoice = getAnchorDrivenChoice(state);
+
   switch (state.progression.sceneId) {
     case "inn": {
       const choices: Choice[] = [
@@ -606,6 +941,10 @@ function buildFallbackChoicesForScene(state: GameState): Choice[] {
           intent: "用才情制造存在感，看看谁会先注意到你。",
         },
       ];
+
+      if (anchorChoice) {
+        choices.unshift(anchorChoice);
+      }
 
       if (state.stats.favor.liu_sanniang >= 2) {
         choices.push({
@@ -636,6 +975,10 @@ function buildFallbackChoicesForScene(state: GameState): Choice[] {
         },
       ];
 
+      if (anchorChoice) {
+        choices.unshift(anchorChoice);
+      }
+
       if (state.stats.wealth >= 4) {
         choices.push({
           id: "buy_information_bundle",
@@ -664,6 +1007,10 @@ function buildFallbackChoicesForScene(state: GameState): Choice[] {
           intent: "避免刚露头就被人借机压下去。",
         },
       ];
+
+      if (anchorChoice) {
+        choices.unshift(anchorChoice);
+      }
 
       if (state.stats.reputation >= 4 || state.stats.favor.shen_yanshu >= 2) {
         choices.push({
@@ -694,6 +1041,10 @@ function buildFallbackChoicesForScene(state: GameState): Choice[] {
         },
       ];
 
+      if (anchorChoice) {
+        choices.unshift(anchorChoice);
+      }
+
       if (state.stats.wealth >= 5 || state.stats.favor.gu_mingzhu >= 2) {
         choices.push({
           id: "expand_trade_scope",
@@ -722,6 +1073,9 @@ function buildFallbackChoicesForScene(state: GameState): Choice[] {
           intent: "避免在官面上用力过猛，把局面做死。",
         },
       ];
+      if (anchorChoice) {
+        choices.unshift(anchorChoice);
+      }
       if (state.stats.reputation >= 4) {
         choices.push({
           id: "use_reputation_pressure",
@@ -752,6 +1106,9 @@ function buildFallbackChoicesForScene(state: GameState): Choice[] {
           intent: "先让手里有钱，再去谈更大的局。",
         },
       ];
+      if (anchorChoice) {
+        choices.unshift(anchorChoice);
+      }
       if (state.progression.chapterId === "chapter_2" || state.stats.reputation >= 5) {
         choices.push({
           id: "answer_high_level_invite",
@@ -762,6 +1119,53 @@ function buildFallbackChoicesForScene(state: GameState): Choice[] {
 
       return choices.slice(0, 4);
     }
+  }
+}
+
+function getAnchorDrivenChoice(state: GameState): Choice | null {
+  switch (state.currentAnchorId) {
+    case "ch1_survive":
+      return {
+        id: "anchor_secure_basics",
+        label: "先把最基本的落脚和吃饭问题彻底稳住",
+        intent: "别继续空转，优先把生存压力解决掉。",
+      };
+    case "ch1_first_contact":
+      return {
+        id: "anchor_meet_key_figure",
+        label: "主动去接触一个真正有分量的人物",
+        intent: "你已经不能只在外围试探了，必须碰到关键人物。",
+      };
+    case "ch1_first_gain":
+      return {
+        id: "anchor_take_real_gain",
+        label: "把聪明和人情换成第一份真实收益",
+        intent: "没有收益或实打实的人情，局面就不会真正改变。",
+      };
+    case "ch1_choose_track":
+      return {
+        id: "anchor_choose_track",
+        label: "明确押注一条上升路线，不再左右摇摆",
+        intent: "你必须开始定路线，让别人知道你到底值什么。",
+      };
+    case "ch2_raise_stakes":
+      return {
+        id: "anchor_raise_stakes",
+        label: "接受更高层的试探，让局势升级",
+        intent: "这一轮必须出现更高层的压力、邀约或赌注。",
+      };
+    case "ch2_secure_backer":
+      return {
+        id: "anchor_secure_backer",
+        label: "争取一个能替你站台的靠山",
+        intent: "没有靠山，你的名声和聪明都容易被人压下去。",
+      };
+    case "ch2_power_entry":
+      return {
+        id: "anchor_power_entry",
+        label: "把现有成果接到更大的权力桌上",
+        intent: "不能再停留在小县城的小打小闹里。",
+      };
   }
 }
 
@@ -867,7 +1271,13 @@ export function buildFallbackTurnResult(state: GameState, choice: Choice, outcom
 }
 
 export function advanceStateForChoice(state: GameState, choice: Choice): ChoiceOutcome {
-  const outcome = enforceForwardMotion(state, buildChoiceOutcome(state, choice));
+  let outcome = buildChoiceOutcome(state, choice);
+
+  if (state.turnsSinceAnchorAdvance >= 2 && !choice.id.startsWith("anchor_")) {
+    outcome = mergeChoiceOutcome(outcome, getAnchorForcingOutcome(state));
+  }
+
+  outcome = enforceForwardMotion(state, outcome);
 
   applyStateDelta(state, outcome.preSceneDelta);
   state.progression.sceneId = outcome.sceneId;
@@ -891,9 +1301,24 @@ export function finalizeTurnState(state: GameState, turn: TurnResult): void {
   applyStateDelta(state, turn.suggestedStateChanges);
   state.lastChoices = turn.choices;
   state.recentSummaries = [...state.recentSummaries, turn.summary].slice(-10);
-  state.recentScenes = [...state.recentScenes, state.progression.sceneId].slice(-6);
-  state.recentEvents = [...state.recentEvents, ...turn.events].slice(-12);
+  state.recentScenes = [...state.recentScenes, state.progression.sceneId].slice(-8);
+  state.recentEvents = [...state.recentEvents, ...turn.events].slice(-16);
   state.lastUpdatedAt = new Date().toISOString();
+
+  const nextAnchor = resolveAnchorAdvance(state);
+  if (nextAnchor && nextAnchor !== state.currentAnchorId) {
+    state.completedAnchors = uniqueStrings([...state.completedAnchors, state.currentAnchorId]);
+    state.currentAnchorId = nextAnchor;
+    state.turnsSinceAnchorAdvance = 0;
+    state.recentEvents = [...state.recentEvents, `anchor_advanced_${nextAnchor}`].slice(-16);
+    state.currentObjective = getAnchorObjective(nextAnchor);
+  } else {
+    state.turnsSinceAnchorAdvance += 1;
+  }
+
+  if (state.currentAnchorId.startsWith("ch2_")) {
+    state.progression.chapterId = "chapter_2";
+  }
 
   if (state.progression.chapterId === "chapter_2") {
     state.currentObjective =

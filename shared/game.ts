@@ -52,6 +52,15 @@ export type StoryFlag =
   | "entered_academy_circle"
   | "entered_business_circle";
 
+export type ChapterAnchorId =
+  | "ch1_survive"
+  | "ch1_first_contact"
+  | "ch1_first_gain"
+  | "ch1_choose_track"
+  | "ch2_raise_stakes"
+  | "ch2_secure_backer"
+  | "ch2_power_entry";
+
 export type StatusTag =
   | "初来乍到"
   | "小有名气"
@@ -111,6 +120,9 @@ export type GameState = {
   gameId: string;
   playerProfile: PlayerProfile;
   progression: GameProgress;
+  currentAnchorId: ChapterAnchorId;
+  completedAnchors: ChapterAnchorId[];
+  turnsSinceAnchorAdvance: number;
   stats: GameStats;
   storyFlags: StoryFlag[];
   recentSummaries: string[];
@@ -161,6 +173,9 @@ export function createEmptyGameState(input: StartGameInput): GameState {
       sceneId: "opening",
       turn: 0,
     },
+    currentAnchorId: "ch1_survive",
+    completedAnchors: [],
+    turnsSinceAnchorAdvance: 0,
     stats: {
       reputation: 0,
       wealth: input.startingAsset === "一点碎银" ? 3 : 1,
