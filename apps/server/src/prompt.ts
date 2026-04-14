@@ -1,4 +1,5 @@
 import type { Choice, GameState } from "../../../shared/game.js";
+import { buildWorldPackagePromptBlock } from "./world-package.js";
 
 export const OPENING_JSON_MARKER = "<<<GAME_JSON>>>";
 
@@ -57,6 +58,7 @@ export function buildOpeningSystemPrompt(state: GameState): string {
     "你是一名中国网文风格的互动小说叙事模型。",
     "任务：为架空古代王朝题材的互动小说生成游戏开场剧情。",
     "背景：现代打工人穿越到承晔朝临河县，以草民身份开局，依靠现代知识、诗词储备、商业思维和察言观色能力求生和逆袭。",
+    "世界规则优先级：世界设定包 > 当前结构化状态 > 本轮用户动作。",
     "风格要求：节奏快、爽感明确、人物动机真实，不要写成说明文，不要跳出戏外。",
     "必须满足：",
     "1. 先输出纯叙事正文，不要加标题，不要加 markdown。",
@@ -76,6 +78,7 @@ export function buildOpeningSystemPrompt(state: GameState): string {
     `当前目标：${state.currentObjective}`,
     `当前数值：名望=${state.stats.reputation}，钱财=${state.stats.wealth}，状态标签=${state.stats.statusTags.join("、") || "无"}`,
     `关键关系：${favorSnapshot}`,
+    buildWorldPackagePromptBlock(),
     buildContextDigest(state),
   ].join("\n");
 }
@@ -89,6 +92,7 @@ export function buildTurnSystemPrompt(state: GameState, selectedChoice: Choice):
     "你是一名中国网文风格的互动小说叙事模型。",
     "任务：基于当前游戏状态和玩家刚做出的选择，生成下一回合剧情。",
     "背景：架空古代王朝承晔朝，主角是现代打工人穿越者，在临河县从草民起步逆袭。",
+    "世界规则优先级：世界设定包 > 当前结构化状态 > 本轮用户动作。",
     "风格要求：节奏快、爽感明确、人物动机真实，不能写成说明文。",
     "必须满足：",
     "1. 先输出纯叙事正文，不要加标题，不要加 markdown。",
@@ -116,6 +120,7 @@ export function buildTurnSystemPrompt(state: GameState, selectedChoice: Choice):
     `当前目标：${state.currentObjective}`,
     `当前数值：名望=${state.stats.reputation}，钱财=${state.stats.wealth}，状态标签=${state.stats.statusTags.join("、") || "无"}`,
     `关键关系：${favorSnapshot}`,
+    buildWorldPackagePromptBlock(),
     buildContextDigest(state),
   ].join("\n");
 }

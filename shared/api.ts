@@ -31,6 +31,13 @@ export type GameSchemaPayload = {
   startingAssets: readonly StartingAsset[];
 };
 
+export type WorldPackagePayload = {
+  path: string;
+  exists: boolean;
+  truncated: boolean;
+  content: string;
+};
+
 export type StartGameStreamEnvelope =
   | {
       type: "chunk";

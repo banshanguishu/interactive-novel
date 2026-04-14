@@ -9,6 +9,7 @@ import type {
   StartGameStreamEnvelope,
   TurnRequest,
   TurnStreamEnvelope,
+  WorldPackagePayload,
 } from "../../../shared/api.js";
 import {
   PLAYER_BACKGROUNDS,
@@ -18,6 +19,7 @@ import {
 } from "../../../shared/game.js";
 import { bootstrapGame, createBootstrappedState, finalizeOpeningState } from "./bootstrap.js";
 import { streamOpeningScene, streamTurnScene } from "./llm.js";
+import { loadWorldPackage } from "./world-package.js";
 import {
   advanceStateForChoice,
   buildFallbackTurnResult,
@@ -72,6 +74,18 @@ app.get("/game/schema", (_req, res) => {
     backgrounds: PLAYER_BACKGROUNDS,
     talents: PLAYER_TALENTS,
     startingAssets: STARTING_ASSETS,
+  };
+
+  res.json(payload);
+});
+
+app.get("/game/world-package", (_req, res) => {
+  const snapshot = loadWorldPackage();
+  const payload: WorldPackagePayload = {
+    path: snapshot.resolvedPath,
+    exists: snapshot.exists,
+    truncated: snapshot.truncated,
+    content: snapshot.content,
   };
 
   res.json(payload);
